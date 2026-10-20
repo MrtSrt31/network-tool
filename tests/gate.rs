@@ -309,6 +309,55 @@ fn nmap_scan_empty_scope_cidrs_warns_but_passes() {
     assert!(warnings.iter().any(|w| w.contains("in-scope CIDR")));
 }
 
+// ---------- LAN modules batch (P1.1c) ----------
+
+#[test]
+fn enum4linux_in_scope_target_passes() {
+    let mut e = authorized_engagement(false);
+    e.scope.in_scope_cidrs = vec!["10.0.0.0/24".into()];
+    let s = spec("enum4linux_ng");
+    let p = params(&[("cidr", "10.0.0.5")]);
+    assert!(gate(&e, &s, &p, false, false).is_ok());
+}
+
+#[test]
+fn enum4linux_out_of_scope_target_blocks() {
+    let mut e = authorized_engagement(false);
+    e.scope.in_scope_cidrs = vec!["10.0.0.0/24".into()];
+    let s = spec("enum4linux_ng");
+    let p = params(&[("cidr", "192.168.1.5")]);
+    assert!(gate(&e, &s, &p, false, false).is_err());
+}
+
+#[test]
+fn responder_requires_disruptive_authorization() {
+    // Authorized but disruptive_allowed = false → blocked.
+    let e = authorized_engagement(false);
+    let s = spec("responder");
+    let p = params(&[("iface", "eth0")]);
+    let res = gate(&e, &s, &p, false, true);
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("disruptive"));
+}
+
+#[test]
+fn responder_passes_with_disruptive_and_confirm() {
+    let e = authorized_engagement(true);
+    let s = spec("responder");
+    let p = params(&[("iface", "eth0")]);
+    assert!(gate(&e, &s, &p, false, true).is_ok());
+}
+
+#[test]
+fn responder_without_confirm_is_blocked() {
+    let e = authorized_engagement(true);
+    let s = spec("responder");
+    let p = params(&[("iface", "eth0")]);
+    let res = gate(&e, &s, &p, false, false);
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("confirm"));
+}
+
 // ---------- scope matcher (P1.2) ----------
 
 #[test]
