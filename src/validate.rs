@@ -29,6 +29,13 @@ pub enum ParamKind {
     Path,
     /// Output filename prefix: `[A-Za-z0-9._-]+`, no leading `-` or `.`.
     Prefix,
+    /// IPv4 CIDR notation `A.B.C.D/N` or a single IPv4 address.
+    Cidr,
+    /// Comma-separated TCP/UDP port list or range: `22,80,443` or `1-1024`
+    /// or a mix: `22,80,1000-2000`. Also accepts `-` as "scan all 65535".
+    Ports,
+    /// Nmap timing template: `T0`..`T5` (ASCII, case-sensitive).
+    Timing,
 }
 
 /// Validate a single parameter value against its declared kind.
@@ -53,6 +60,9 @@ pub fn check(kind: ParamKind, value: &str) -> Result<(), String> {
         ParamKind::Count => check_count(value),
         ParamKind::Path => check_path(value),
         ParamKind::Prefix => check_prefix(value),
+        ParamKind::Cidr => check_cidr(value),
+        ParamKind::Ports => check_ports(value),
+        ParamKind::Timing => check_timing(value),
     }
 }
 
@@ -167,6 +177,77 @@ fn check_path(v: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn check_cidr(v: &str) -> Result<(), String> {
+    if v.starts_with('-') {
+        return Err(format!("'{v}': CIDR cannot start with '-'"));
+    }
+    let (addr, prefix_opt) = match v.split_once('/') {
+        Some((a, p)) => (a, Some(p)),
+        None => (v, None),
+    };
+    let parts: Vec<&str> = addr.split('.').collect();
+    if parts.len() != 4 {
+        return Err(format!("'{v}': expected IPv4 address A.B.C.D"));
+    }
+    for p in &parts {
+        if p.is_empty() || p.len() > 3 || !p.chars().all(|c| c.is_ascii_digit()) {
+            return Err(format!("'{v}': malformed IPv4 octet '{p}'"));
+        }
+        let n: u16 = p.parse().unwrap_or(999);
+        if n > 255 {
+            return Err(format!("'{v}': octet {n} out of range (0..=255)"));
+        }
+    }
+    if let Some(p) = prefix_opt {
+        if p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+            return Err(format!("'{v}': expected numeric prefix length after '/'"));
+        }
+        let n: u16 = p.parse().unwrap_or(999);
+        if n > 32 {
+            return Err(format!("'{v}': prefix /{n} out of range (0..=32)"));
+        }
+    }
+    Ok(())
+}
+
+fn check_ports(v: &str) -> Result<(), String> {
+    if v == "-" {
+        return Ok(());
+    }
+    if v.starts_with('-') {
+        return Err(format!("'{v}': ports cannot start with '-'"));
+    }
+    for item in v.split(',') {
+        let item = item.trim();
+        if item.is_empty() {
+            return Err(format!("'{v}': empty port in list"));
+        }
+        let (lo, hi) = match item.split_once('-') {
+            Some((a, b)) => (a, b),
+            None => (item, item),
+        };
+        for p in [lo, hi] {
+            if p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+                return Err(format!("'{v}': malformed port '{p}'"));
+            }
+            let n: u32 = p.parse().unwrap_or(0);
+            if n == 0 || n > 65535 {
+                return Err(format!("'{v}': port {n} out of range (1..=65535)"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_timing(v: &str) -> Result<(), String> {
+    const ALLOWED: &[&str] = &["T0", "T1", "T2", "T3", "T4", "T5"];
+    if ALLOWED.contains(&v) {
+        Ok(())
+    } else {
+        Err(format!("'{v}': nmap timing must be one of T0..T5"))
+    }
 }
 
 fn check_prefix(v: &str) -> Result<(), String> {

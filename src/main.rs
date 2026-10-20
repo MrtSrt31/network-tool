@@ -31,6 +31,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Start the local web GUI control panel.
     Gui(GuiArgs),
@@ -239,6 +240,12 @@ struct ModuleRunArgs {
     prefix: Option<String>,
     #[arg(long)]
     out: Option<String>,
+    #[arg(long)]
+    cidr: Option<String>,
+    #[arg(long)]
+    ports: Option<String>,
+    #[arg(long)]
+    timing: Option<String>,
     /// Timeout in seconds (0 = no timeout).
     #[arg(long, default_value_t = 0)]
     timeout: u64,
@@ -546,6 +553,9 @@ fn run_module(a: ModuleRunArgs) -> Result<(), Box<dyn Error>> {
         ("essid", &a.essid),
         ("prefix", &a.prefix),
         ("out", &a.out),
+        ("cidr", &a.cidr),
+        ("ports", &a.ports),
+        ("timing", &a.timing),
     ] {
         if let Some(x) = v {
             params.insert(k.to_string(), x.clone());

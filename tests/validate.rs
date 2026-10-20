@@ -230,3 +230,69 @@ fn prefix_rejects_metachars() {
 fn prefix_rejects_overlength() {
     bad(ParamKind::Prefix, &"a".repeat(65));
 }
+
+// ---------- CIDR ----------
+
+#[test]
+fn cidr_accepts_well_formed_v4_networks() {
+    ok(ParamKind::Cidr, "10.0.0.0/24");
+    ok(ParamKind::Cidr, "192.168.1.0/16");
+    ok(ParamKind::Cidr, "172.16.0.0/12");
+    ok(ParamKind::Cidr, "0.0.0.0/0");
+    ok(ParamKind::Cidr, "127.0.0.1");
+    ok(ParamKind::Cidr, "10.0.0.1/32");
+}
+
+#[test]
+fn cidr_rejects_malformed_inputs() {
+    bad(ParamKind::Cidr, "10.0.0");
+    bad(ParamKind::Cidr, "10.0.0.0.0");
+    bad(ParamKind::Cidr, "10.0.0.256");
+    bad(ParamKind::Cidr, "10.0.0.0/33");
+    bad(ParamKind::Cidr, "10.0.0.0/");
+    bad(ParamKind::Cidr, "10.0.0.0/-1");
+    bad(ParamKind::Cidr, "");
+}
+
+#[test]
+fn cidr_rejects_argument_injection() {
+    bad(ParamKind::Cidr, "-10.0.0.0");
+    bad(ParamKind::Cidr, "--help");
+}
+
+// ---------- Ports ----------
+
+#[test]
+fn ports_accepts_lists_and_ranges() {
+    ok(ParamKind::Ports, "22");
+    ok(ParamKind::Ports, "22,80,443");
+    ok(ParamKind::Ports, "1-1024");
+    ok(ParamKind::Ports, "22,80,1000-2000,8080");
+    ok(ParamKind::Ports, "-");
+    ok(ParamKind::Ports, "65535");
+}
+
+#[test]
+fn ports_rejects_out_of_range_and_junk() {
+    bad(ParamKind::Ports, "0");
+    bad(ParamKind::Ports, "65536");
+    bad(ParamKind::Ports, "22,");
+    bad(ParamKind::Ports, "22,,80");
+    bad(ParamKind::Ports, "abc");
+    bad(ParamKind::Ports, "22;rm");
+    bad(ParamKind::Ports, "-1");
+}
+
+// ---------- Timing ----------
+
+#[test]
+fn timing_accepts_only_t0_through_t5() {
+    for t in ["T0", "T1", "T2", "T3", "T4", "T5"] {
+        ok(ParamKind::Timing, t);
+    }
+    bad(ParamKind::Timing, "t3");
+    bad(ParamKind::Timing, "T6");
+    bad(ParamKind::Timing, "T");
+    bad(ParamKind::Timing, "T3 extra");
+    bad(ParamKind::Timing, "-T3");
+}

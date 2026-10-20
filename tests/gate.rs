@@ -265,3 +265,56 @@ fn optional_client_mac_in_deauth_still_validates() {
     assert!(res.is_err());
     assert!(res.unwrap_err().contains("Client MAC"));
 }
+
+// ---------- nmap_scan (P1.1a) ----------
+
+#[test]
+fn nmap_scan_in_scope_cidr_passes() {
+    let mut e = authorized_engagement(false);
+    e.scope.in_scope_cidrs = vec!["10.0.0.0/24".into()];
+    let s = spec("nmap_scan");
+    let p = params(&[("cidr", "10.0.0.0/24")]);
+    let res = gate(&e, &s, &p, false, false);
+    assert!(res.is_ok(), "expected pass, got {res:?}");
+}
+
+#[test]
+fn nmap_scan_out_of_scope_cidr_is_blocked() {
+    let mut e = authorized_engagement(false);
+    e.scope.in_scope_cidrs = vec!["10.0.0.0/24".into()];
+    let s = spec("nmap_scan");
+    let p = params(&[("cidr", "10.1.0.0/24")]);
+    let res = gate(&e, &s, &p, false, false);
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("in-scope CIDR"));
+}
+
+#[test]
+fn nmap_scan_malformed_cidr_is_rejected() {
+    let mut e = authorized_engagement(false);
+    e.scope.in_scope_cidrs = vec!["10.0.0.0/24".into()];
+    let s = spec("nmap_scan");
+    let p = params(&[("cidr", "10.0.0.0/99")]);
+    let res = gate(&e, &s, &p, false, false);
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("Target"));
+}
+
+#[test]
+fn nmap_scan_empty_scope_cidrs_warns_but_passes() {
+    let e = authorized_engagement(false);
+    let s = spec("nmap_scan");
+    let p = params(&[("cidr", "10.0.0.0/24")]);
+    let warnings = gate(&e, &s, &p, false, false).expect("empty scope must warn only");
+    assert!(warnings.iter().any(|w| w.contains("in-scope CIDR")));
+}
+
+#[test]
+fn nmap_scan_ports_validation_rejects_metachars() {
+    let mut e = authorized_engagement(false);
+    e.scope.in_scope_cidrs = vec!["10.0.0.0/24".into()];
+    let s = spec("nmap_scan");
+    let p = params(&[("cidr", "10.0.0.0/24"), ("ports", "22;rm -rf /")]);
+    let res = gate(&e, &s, &p, false, false);
+    assert!(res.is_err());
+}
