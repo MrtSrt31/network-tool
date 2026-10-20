@@ -52,6 +52,8 @@ enum Commands {
     },
     /// Generate a report (markdown or html) for an engagement.
     Report(ReportArgs),
+    /// Verify the SHA-256 integrity footer of a rendered report file.
+    ReportVerify(ReportVerifyArgs),
     /// Generate the Authorization & Rules of Engagement document for an engagement.
     Roe(RoeArgs),
     /// Active test-execution modules (orchestrate your installed wireless tools). Authorized use only.
@@ -153,6 +155,12 @@ struct ReportArgs {
     /// Write to this file instead of stdout.
     #[arg(long)]
     out: Option<String>,
+}
+
+#[derive(Args)]
+struct ReportVerifyArgs {
+    /// Path to a rendered report file to verify.
+    file: String,
 }
 
 #[derive(Args)]
@@ -410,6 +418,19 @@ fn run() -> Result<(), Box<dyn Error>> {
                     println!("wrote report to {path}");
                 }
                 None => print!("{output}"),
+            }
+        }
+        Commands::ReportVerify(a) => {
+            let content = fs::read_to_string(&a.file)?;
+            match report::verify(&content) {
+                Ok(digest) => {
+                    println!("OK — report integrity verifies");
+                    println!("sha256: {digest}");
+                }
+                Err(err) => {
+                    eprintln!("FAIL — {err}");
+                    std::process::exit(2);
+                }
             }
         }
         Commands::Roe(a) => {

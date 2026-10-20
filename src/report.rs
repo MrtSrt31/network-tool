@@ -1,9 +1,92 @@
 //! Report generation: Markdown (portable, git-friendly) and standalone HTML
 //! (printable). Both are built directly from the engagement data.
+//!
+//! Every rendered report carries a tamper-evidence footer: the SHA-256 of
+//! its own body (with the hash placeholder replaced AFTER hashing), plus
+//! the audit chain head. [`verify`] re-does the computation on a saved
+//! report file so a reader can independently check that nothing has been
+//! edited after export.
 
 use crate::content;
 use crate::model::Engagement;
 use crate::util::esc;
+use sha2::{Digest, Sha256};
+
+/// Marker inserted into the report body as a placeholder before hashing;
+/// the real hex digest is substituted after SHA-256 is computed over the
+/// body-with-marker. `verify` reverses this: it finds the hex, swaps it
+/// back for the marker, and rehashes.
+const HASH_MARKER: &str = "NTOOL_HASH:PLACEHOLDER";
+
+fn hash_hex(bytes: &[u8]) -> String {
+    let d = Sha256::digest(bytes);
+    let mut s = String::with_capacity(64);
+    for b in d {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
+/// Stamp a rendered report: compute SHA-256 of the body-with-marker, then
+/// swap the marker for the actual digest. Returns the sealed body.
+fn seal(body: String) -> String {
+    let digest = hash_hex(body.as_bytes());
+    body.replacen(HASH_MARKER, &format!("NTOOL_HASH:{digest}"), 1)
+}
+
+/// Outcome of verifying a saved report file. The error cases are distinct
+/// so the CLI can give a precise reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerifyError {
+    /// No `NTOOL_HASH:<hex>` marker found in the file.
+    NoMarker,
+    /// The stored hex is malformed (not 64 hex chars).
+    MalformedHash,
+    /// The marker was present but the recomputed digest does not match.
+    /// `stored` is what was in the file, `recomputed` is what the content
+    /// actually hashes to.
+    Mismatch { stored: String, recomputed: String },
+}
+
+impl std::fmt::Display for VerifyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VerifyError::NoMarker => write!(f, "report has no NTOOL_HASH marker"),
+            VerifyError::MalformedHash => write!(f, "report's NTOOL_HASH marker is malformed"),
+            VerifyError::Mismatch { stored, recomputed } => write!(
+                f,
+                "report hash mismatch\n  stored:     {stored}\n  recomputed: {recomputed}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for VerifyError {}
+
+/// Verify a saved report. Returns the hex digest on success.
+pub fn verify(content: &str) -> Result<String, VerifyError> {
+    let needle = "NTOOL_HASH:";
+    let marker_at = content.find(needle).ok_or(VerifyError::NoMarker)?;
+    let hex_start = marker_at + needle.len();
+    if content.len() < hex_start + 64 {
+        return Err(VerifyError::MalformedHash);
+    }
+    let hex = &content[hex_start..hex_start + 64];
+    if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(VerifyError::MalformedHash);
+    }
+    let stored = hex.to_lowercase();
+    let reconstructed = format!(
+        "{}{HASH_MARKER}{}",
+        &content[..marker_at],
+        &content[hex_start + 64..]
+    );
+    let recomputed = hash_hex(reconstructed.as_bytes());
+    if recomputed != stored {
+        return Err(VerifyError::Mismatch { stored, recomputed });
+    }
+    Ok(stored)
+}
 
 pub fn markdown(e: &Engagement) -> String {
     let mut s = String::new();
@@ -200,13 +283,16 @@ pub fn markdown(e: &Engagement) -> String {
 
     s.push_str("---\n\n");
     s.push_str(&format!(
-        "_Audit chain head: `{}` ({} entries). Verify with `networktool audit verify {}`._\n",
+        "_Audit chain head: `{}` ({} entries). Verify with `networktool audit verify {}`._\n\n",
         crate::audit::chain_head(e),
         e.action_log.len(),
         e.id,
     ));
+    s.push_str(&format!(
+        "_Document integrity: `{HASH_MARKER}`. Verify with `networktool report verify <file>`._\n",
+    ));
 
-    s
+    seal(s)
 }
 
 pub fn html(e: &Engagement) -> String {
@@ -396,8 +482,11 @@ pub fn html(e: &Engagement) -> String {
         e.action_log.len(),
         esc(&e.id),
     ));
+    body.push_str(&format!(
+        "<p class=meta><b>Document integrity:</b> <span class=mono>{HASH_MARKER}</span> &nbsp;·&nbsp; verify with <code>networktool report verify &lt;file&gt;</code></p>",
+    ));
 
-    wrap_report_html(&e.name, &body)
+    seal(wrap_report_html(&e.name, &body))
 }
 
 fn push_para(body: &mut String, label: &str, text: &str) {
