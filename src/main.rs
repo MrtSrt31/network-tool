@@ -63,6 +63,11 @@ enum Commands {
         #[command(subcommand)]
         action: AuditAction,
     },
+    /// At-rest encryption vault (P0.8 iskelet — primitives + key management).
+    Vault {
+        #[command(subcommand)]
+        action: VaultAction,
+    },
 }
 
 #[derive(Args)]
@@ -159,6 +164,23 @@ struct RoeArgs {
     /// Write to this file instead of stdout.
     #[arg(long)]
     out: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum VaultAction {
+    /// Create a new master key for this data dir. Passphrase via
+    /// `--passphrase` or the `NETWORKTOOL_PASSPHRASE` env var.
+    Init {
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Verify a passphrase against the stored master key.
+    Unlock {
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Show vault status (initialised? where is .master?).
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -437,6 +459,43 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
             ModuleAction::Run(a) => run_module(a)?,
         },
+        Commands::Vault { action } => {
+            let data_dir = store::data_dir();
+            match action {
+                VaultAction::Status => {
+                    let path = network_tool::crypto::master_file_path(&data_dir);
+                    if network_tool::crypto::is_initialised(&data_dir) {
+                        println!("initialised · {}", path.display());
+                    } else {
+                        println!("not initialised · would be at {}", path.display());
+                    }
+                }
+                VaultAction::Init { passphrase } => {
+                    let pw = passphrase
+                        .or_else(|| std::env::var("NETWORKTOOL_PASSPHRASE").ok())
+                        .ok_or("passphrase required (via --passphrase or NETWORKTOOL_PASSPHRASE env var)")?;
+                    if pw.len() < 10 {
+                        return Err("passphrase must be at least 10 characters".into());
+                    }
+                    network_tool::crypto::init_master(
+                        &data_dir,
+                        &pw,
+                        network_tool::crypto::KdfParams::secure_default(),
+                    )?;
+                    println!(
+                        "vault initialised at {}",
+                        network_tool::crypto::master_file_path(&data_dir).display()
+                    );
+                }
+                VaultAction::Unlock { passphrase } => {
+                    let pw = passphrase
+                        .or_else(|| std::env::var("NETWORKTOOL_PASSPHRASE").ok())
+                        .ok_or("passphrase required (via --passphrase or NETWORKTOOL_PASSPHRASE env var)")?;
+                    network_tool::crypto::unlock(&data_dir, &pw)?;
+                    println!("ok — passphrase verifies against the stored master key");
+                }
+            }
+        }
         Commands::Audit { action } => match action {
             AuditAction::Verify { id } => {
                 let e = store::load(&id)?;
