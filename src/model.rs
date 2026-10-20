@@ -423,6 +423,12 @@ pub struct Finding {
     /// True when auto-suggested from a recon import (not yet operator-confirmed).
     #[serde(default)]
     pub auto_detected: bool,
+    /// IDs of `ActionRun` entries that back this finding (which commands
+    /// produced the evidence). Rendered in the finding detail page and in
+    /// the report so the reviewer can walk from a finding to the exact
+    /// invocations behind it. Serde default empty for backward compat.
+    #[serde(default)]
+    pub evidence_action_runs: Vec<String>,
 }
 
 impl Finding {
@@ -446,6 +452,7 @@ impl Finding {
             retests: vec![],
             created_at: Utc::now(),
             auto_detected: false,
+            evidence_action_runs: vec![],
         }
     }
 }

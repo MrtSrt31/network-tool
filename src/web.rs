@@ -142,6 +142,9 @@ fn route(method: &Method, segs: &[&str], form: &HashMap<String, String>) -> Out 
         (Method::Post, ["engagement", id, "finding", fid, "retest"]) => {
             finding_retest(id, fid, form)
         }
+        (Method::Post, ["engagement", id, "finding", fid, "attach"]) => {
+            finding_attach(id, fid, form)
+        }
         (Method::Get, ["engagement", id, "report"]) => match store::load(id) {
             Ok(e) => Out::Html(report::html(&e)),
             Err(_) => not_found(),
@@ -935,6 +938,31 @@ fn finding_update(id: &str, fid: &str, form: &HashMap<String, String>) -> Out {
     }
 }
 
+/// Attach / detach `ActionRun` ids to a finding. The form submits a
+/// checkbox per action with name `attach_<id>`; everything present is the
+/// new set, so unchecked boxes implicitly detach. Unknown ids (no matching
+/// action) are discarded.
+fn finding_attach(id: &str, fid: &str, form: &HashMap<String, String>) -> Out {
+    let mut e = match store::load(id) {
+        Ok(e) => e,
+        Err(_) => return not_found(),
+    };
+    let valid_ids: std::collections::HashSet<String> =
+        e.action_log.iter().map(|a| a.id.clone()).collect();
+    let selected: Vec<String> = form
+        .keys()
+        .filter_map(|k| k.strip_prefix("attach_").map(|s| s.to_string()))
+        .filter(|id| valid_ids.contains(id))
+        .collect();
+    let dest = format!("/engagement/{id}/finding/{fid}");
+    if let Some(f) = e.findings.iter_mut().find(|f| f.id == fid) {
+        f.evidence_action_runs = selected;
+        save_then_redirect(&mut e, dest)
+    } else {
+        Out::Redirect(dest)
+    }
+}
+
 fn finding_retest(id: &str, fid: &str, form: &HashMap<String, String>) -> Out {
     let mut e = match store::load(id) {
         Ok(e) => e,
@@ -994,6 +1022,55 @@ fn finding_detail(id: &str, fid: &str) -> Out {
         retests.push_str("</table>");
     }
 
+    // Audit-log attachment UI: a checkbox per ActionRun, pre-checked when
+    // the action is already linked to this finding.
+    let attached: std::collections::HashSet<&str> =
+        f.evidence_action_runs.iter().map(|s| s.as_str()).collect();
+    let mut attach_section = String::new();
+    if e.action_log.is_empty() {
+        attach_section.push_str(
+            "<p class=dim>No actions recorded yet — run modules to produce evidence.</p>",
+        );
+    } else {
+        attach_section.push_str(&format!(
+            "<form method=post action='/engagement/{id}/finding/{fid}/attach' class=form>{csrf}<table><tr><th></th><th>When</th><th>Module</th><th>Target</th><th>Result</th></tr>",
+            id = id,
+            fid = fid,
+            csrf = auth::csrf_field(),
+        ));
+        for a in &e.action_log {
+            let checked = if attached.contains(a.id.as_str()) {
+                "checked"
+            } else {
+                ""
+            };
+            let kind = if a.disruptive {
+                " · <b>DISRUPTIVE</b>"
+            } else {
+                ""
+            };
+            let dry = if a.dry_run { " · dry-run" } else { "" };
+            attach_section.push_str(&format!(
+                "<tr><td><input type=checkbox name='attach_{aid}' {checked}></td>\
+<td class=mono>{at}</td>\
+<td>{m}</td>\
+<td class=mono>{t}</td>\
+<td class=mono>{s}{dry}{kind}</td></tr>",
+                aid = a.id,
+                checked = checked,
+                at = a.at.format("%Y-%m-%d %H:%M"),
+                m = esc(&a.module_name),
+                t = esc(&a.target),
+                s = esc(&a.summary),
+                dry = dry,
+                kind = kind,
+            ));
+        }
+        attach_section.push_str(
+            "</table><div class=actions><button class=btn-primary type=submit>Update evidence links</button></div></form>",
+        );
+    }
+
     let results = ["Open", "Partial", "Mitigated"];
     let body = format!(
         "<div class=crumb><a href='/engagement/{id}'>← dashboard</a></div>\
@@ -1003,6 +1080,7 @@ fn finding_detail(id: &str, fid: &str) -> Out {
 <p class=lbl>Evidence</p><p>{ev}</p>\
 <p class=lbl>Impact</p><p>{imp}</p>\
 <p class=lbl>Remediation</p><p>{rem}</p></div>\
+<h2>Linked actions (audit chain evidence)</h2>{attach_section}\
 <h2>Iterative retest</h2>{retests}\
 <form method=post action='/engagement/{id}/finding/{fid}/retest' class=form>{csrf}\
 <div class=grid3>{r_date}{r_tech}{r_result}</div>{r_notes}\

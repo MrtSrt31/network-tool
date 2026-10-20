@@ -167,6 +167,43 @@ fn roe_html_drops_draft_banner_once_authorized() {
     assert!(html.contains("ROE-123"));
 }
 
+// ---------- Finding ↔ ActionRun links (P1.7) ----------
+
+#[test]
+fn report_shows_linked_actions_when_present_in_markdown() {
+    let mut e = populated_engagement();
+    // Link the engagement's single action to its single finding.
+    let action_id = e.action_log[0].id.clone();
+    e.findings[0].evidence_action_runs = vec![action_id.clone()];
+    let md = report::markdown(&e);
+    assert!(md.contains("Linked actions"));
+    assert!(md.contains("Survey / discovery scan"));
+    assert!(md.contains("airodump-ng"));
+}
+
+#[test]
+fn report_shows_linked_actions_when_present_in_html() {
+    let mut e = populated_engagement();
+    let action_id = e.action_log[0].id.clone();
+    e.findings[0].evidence_action_runs = vec![action_id];
+    let html = report::html(&e);
+    assert!(html.contains("Linked actions"));
+    assert!(html.contains("airodump-ng"));
+}
+
+#[test]
+fn report_tolerates_dangling_action_reference() {
+    // If a finding references an action id that is no longer in the log
+    // (e.g. a legacy engagement where someone truncated the log), the
+    // renderer must still produce valid output.
+    let mut e = populated_engagement();
+    e.findings[0].evidence_action_runs = vec!["nonexistent".into()];
+    let md = report::markdown(&e);
+    let html = report::html(&e);
+    assert!(md.contains("Linked actions"));
+    assert!(html.contains("Linked actions"));
+}
+
 // ---------- ATT&CK technique links (P1.6) ----------
 
 #[test]

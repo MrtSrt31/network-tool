@@ -150,6 +150,21 @@ pub fn markdown(e: &Engagement) -> String {
             if !f.remediation.is_empty() {
                 s.push_str(&format!("**Remediation.** {}\n\n", f.remediation));
             }
+            if !f.evidence_action_runs.is_empty() {
+                s.push_str("**Linked actions (audit chain evidence).**\n\n");
+                for aid in &f.evidence_action_runs {
+                    if let Some(a) = e.action_log.iter().find(|a| &a.id == aid) {
+                        s.push_str(&format!(
+                            "- `{}` — {} — `{}` — {}\n",
+                            a.at.format("%Y-%m-%dT%H:%MZ"),
+                            a.module_name,
+                            a.command,
+                            a.summary
+                        ));
+                    }
+                }
+                s.push('\n');
+            }
             if !f.retests.is_empty() {
                 s.push_str("**Retest history.**\n\n");
                 for r in &f.retests {
@@ -328,6 +343,21 @@ pub fn html(e: &Engagement) -> String {
             push_para(&mut body, "Evidence", &f.evidence);
             push_para(&mut body, "Impact", &f.impact);
             push_para(&mut body, "Remediation", &f.remediation);
+            if !f.evidence_action_runs.is_empty() {
+                body.push_str("<p class=lbl>Linked actions (audit chain evidence)</p><ul>");
+                for aid in &f.evidence_action_runs {
+                    if let Some(a) = e.action_log.iter().find(|a| &a.id == aid) {
+                        body.push_str(&format!(
+                            "<li class=mono>{} — {} — <code>{}</code> — {}</li>",
+                            a.at.format("%Y-%m-%dT%H:%MZ"),
+                            esc(&a.module_name),
+                            esc(&a.command),
+                            esc(&a.summary),
+                        ));
+                    }
+                }
+                body.push_str("</ul>");
+            }
             if !f.retests.is_empty() {
                 body.push_str("<p class=lbl>Retest history</p><ul>");
                 for r in &f.retests {
