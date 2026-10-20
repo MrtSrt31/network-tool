@@ -204,6 +204,32 @@ pub fn registry() -> Vec<ModuleSpec> {
             ],
         },
         ModuleSpec {
+            id: "enum4linux_ng",
+            name: "SMB / LDAP enumeration (enum4linux-ng)",
+            category: "Management Interface & Infrastructure",
+            tactic: "Discovery",
+            technique: "T1087",
+            disruptive: false,
+            tools: &["enum4linux-ng"],
+            description: "Enumerate SMB shares, users, groups, policy and OS info from a Windows / Samba host (enum4linux-ng). Low noise, read-only.",
+            params: vec![
+                p("cidr", "Target host (bare IP)", true, "10.0.0.5", ParamKind::Cidr),
+            ],
+        },
+        ModuleSpec {
+            id: "responder",
+            name: "LLMNR / NBT-NS / mDNS poisoner (Responder)",
+            category: "Rogue / Evil Twin & Client-side",
+            tactic: "Credential Access",
+            technique: "T1557.001",
+            disruptive: true,
+            tools: &["responder"],
+            description: "Listen for LLMNR / NBT-NS / mDNS name-resolution requests and answer with the operator's host to collect NTLMv2 challenges. Highly intrusive — disruptive_allowed + explicit confirm required.",
+            params: vec![
+                p("iface", "Listening interface", true, "eth0", ParamKind::Iface),
+            ],
+        },
+        ModuleSpec {
             id: "nmap_scan",
             name: "Wired host discovery + port scan (nmap)",
             category: "Network Segmentation",
@@ -476,6 +502,14 @@ pub fn build_command(
                 or("out", "ntool-pmkid.pcapng"),
                 "--enable_status=1".into(),
             ],
+        ),
+        "enum4linux_ng" => (
+            "enum4linux-ng".into(),
+            vec!["-A".into(), "--".into(), g("cidr")],
+        ),
+        "responder" => (
+            "responder".into(),
+            vec!["-I".into(), g("iface"), "-v".into()],
         ),
         "arp_discovery" => {
             let mut a = vec!["-I".into(), g("iface")];
