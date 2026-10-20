@@ -134,6 +134,12 @@ pub fn save(e: &mut Engagement) -> Result<(), SaveError> {
     let on_disk = disk_version(&e.id)?;
     if let Some(disk_v) = on_disk {
         if disk_v != e.version {
+            log::warn!(
+                "save conflict · engagement={} on_disk={} incoming={}",
+                e.id,
+                disk_v,
+                e.version
+            );
             return Err(SaveError::Conflict {
                 on_disk: disk_v,
                 incoming: e.version,

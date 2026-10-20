@@ -9,7 +9,7 @@
 
 use clap::{Args, Parser, Subcommand};
 use network_tool::model::*;
-use network_tool::{model, modules, recon, report, roe, store, web};
+use network_tool::{logging, model, modules, recon, report, roe, store, web};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
@@ -21,6 +21,11 @@ use std::fs;
     about = "Network Tool — authorized wireless security assessment platform (GUI + CLI)."
 )]
 struct Cli {
+    /// Mirror the log stream (gate decisions, module runs, auth events) to
+    /// stderr in addition to the daily log file.
+    #[arg(short, long, global = true)]
+    verbose: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -232,6 +237,13 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
+    // Initialise logging as early as possible. A failure here is non-fatal
+    // (we still want the CLI to work on a read-only data dir), so warn and
+    // continue.
+    if let Err(e) = logging::init(cli.verbose) {
+        eprintln!("warning: could not initialise log file: {e}");
+    }
+    log::info!("networktool start · verbose={}", cli.verbose);
     match cli.command {
         Commands::Gui(a) => web::serve(a.port, a.open)?,
         Commands::Engagement { action } => match action {
@@ -481,8 +493,16 @@ fn run_module(a: ModuleRunArgs) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let warnings = modules::gate(&e, &spec, &params, a.dry_run, a.confirm)
-        .map_err(|m| format!("blocked: {m}"))?;
+    let warnings = modules::gate(&e, &spec, &params, a.dry_run, a.confirm).map_err(|m| {
+        log::warn!(
+            "gate block · engagement={} module={} dry_run={} :: {}",
+            e.id,
+            spec.id,
+            a.dry_run,
+            m
+        );
+        format!("blocked: {m}")
+    })?;
     for w in &warnings {
         eprintln!("warning: {w}");
     }
@@ -490,6 +510,13 @@ fn run_module(a: ModuleRunArgs) -> Result<(), Box<dyn Error>> {
     let (program, args) = modules::build_command(&spec, &params);
     let cmdline = modules::display_command(&program, &args);
     println!("$ {cmdline}");
+    log::info!(
+        "module spawn · engagement={} module={} dry_run={} cmd={}",
+        e.id,
+        spec.id,
+        a.dry_run,
+        cmdline
+    );
 
     if a.dry_run {
         record_action(
@@ -524,12 +551,18 @@ fn run_module(a: ModuleRunArgs) -> Result<(), Box<dyn Error>> {
     if r.cancelled {
         suffix.push_str(" · CANCELLED");
     }
-    println!(
-        "[exit {}{}]",
-        r.exit_code
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| "signal".to_string()),
-        suffix,
+    let exit_label = r
+        .exit_code
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "signal".to_string());
+    println!("[exit {exit_label}{suffix}]");
+    log::info!(
+        "module exit · engagement={} module={} exit={} timed_out={} cancelled={}",
+        e.id,
+        spec.id,
+        exit_label,
+        r.timed_out,
+        r.cancelled,
     );
 
     let summary = modules::summarize(&r);

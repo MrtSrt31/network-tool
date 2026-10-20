@@ -6,6 +6,7 @@
 
 pub mod audit;
 pub mod content;
+pub mod logging;
 pub mod model;
 pub mod modules;
 pub mod recon;
