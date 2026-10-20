@@ -10,12 +10,14 @@
 //!   * a `disruptive` module additionally requires `authorization.disruptive_allowed`
 //!     and an explicit confirmation;
 //!   * a target BSSID is checked against the engagement's in-scope BSSID list.
-//! Dry-run (command preview) never executes anything and downgrades gate failures
-//! to warnings so the operator can plan.
+//!
+//! Dry-run (command preview) never executes anything and downgrades gate
+//! failures to warnings so the operator can plan.
 //!
 //! For authorized engagements only.
 
 use crate::model::Engagement;
+use crate::validate::{self, ParamKind};
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,14 +31,22 @@ pub struct Param {
     pub label: &'static str,
     pub required: bool,
     pub placeholder: &'static str,
+    pub kind: ParamKind,
 }
 
-fn p(key: &'static str, label: &'static str, required: bool, placeholder: &'static str) -> Param {
+fn p(
+    key: &'static str,
+    label: &'static str,
+    required: bool,
+    placeholder: &'static str,
+    kind: ParamKind,
+) -> Param {
     Param {
         key,
         label,
         required,
         placeholder,
+        kind,
     }
 }
 
@@ -63,7 +73,7 @@ pub fn registry() -> Vec<ModuleSpec> {
             disruptive: false,
             tools: &["airmon-ng"],
             description: "Put a wireless interface into monitor mode (airmon-ng start).",
-            params: vec![p("iface", "Interface", true, "wlan0")],
+            params: vec![p("iface", "Interface", true, "wlan0", ParamKind::Iface)],
         },
         ModuleSpec {
             id: "airmon_stop",
@@ -74,7 +84,7 @@ pub fn registry() -> Vec<ModuleSpec> {
             disruptive: false,
             tools: &["airmon-ng"],
             description: "Return the interface to managed mode (airmon-ng stop).",
-            params: vec![p("iface", "Monitor interface", true, "wlan0mon")],
+            params: vec![p("iface", "Monitor interface", true, "wlan0mon", ParamKind::Iface)],
         },
         ModuleSpec {
             id: "scan",
@@ -86,8 +96,8 @@ pub fn registry() -> Vec<ModuleSpec> {
             tools: &["airodump-ng"],
             description: "Capture a wide survey to CSV (airodump-ng). Import the CSV afterwards to build the asset inventory.",
             params: vec![
-                p("iface", "Monitor interface", true, "wlan0mon"),
-                p("prefix", "Output prefix", false, "ntool-scan"),
+                p("iface", "Monitor interface", true, "wlan0mon", ParamKind::Iface),
+                p("prefix", "Output prefix", false, "ntool-scan", ParamKind::Prefix),
             ],
         },
         ModuleSpec {
@@ -100,10 +110,10 @@ pub fn registry() -> Vec<ModuleSpec> {
             tools: &["airodump-ng"],
             description: "Lock airodump-ng to one BSSID/channel and write a capture (to catch a WPA handshake). Pair with a deauth if RoE permits.",
             params: vec![
-                p("bssid", "Target BSSID", true, "AA:BB:CC:11:22:33"),
-                p("channel", "Channel", true, "6"),
-                p("iface", "Monitor interface", true, "wlan0mon"),
-                p("prefix", "Output prefix", false, "ntool-hs"),
+                p("bssid", "Target BSSID", true, "AA:BB:CC:11:22:33", ParamKind::Mac),
+                p("channel", "Channel", true, "6", ParamKind::Channel),
+                p("iface", "Monitor interface", true, "wlan0mon", ParamKind::Iface),
+                p("prefix", "Output prefix", false, "ntool-hs", ParamKind::Prefix),
             ],
         },
         ModuleSpec {
@@ -116,10 +126,10 @@ pub fn registry() -> Vec<ModuleSpec> {
             tools: &["aireplay-ng"],
             description: "Send deauth frames (aireplay-ng) to force a reconnect/handshake and to test 802.11w (PMF). Disruptive to clients.",
             params: vec![
-                p("bssid", "Target BSSID", true, "AA:BB:CC:11:22:33"),
-                p("iface", "Monitor interface", true, "wlan0mon"),
-                p("count", "Frame count", false, "5"),
-                p("client", "Client MAC (optional)", false, "A0:B0:C0:D0:E0:F0"),
+                p("bssid", "Target BSSID", true, "AA:BB:CC:11:22:33", ParamKind::Mac),
+                p("iface", "Monitor interface", true, "wlan0mon", ParamKind::Iface),
+                p("count", "Frame count", false, "5", ParamKind::Count),
+                p("client", "Client MAC (optional)", false, "A0:B0:C0:D0:E0:F0", ParamKind::Mac),
             ],
         },
         ModuleSpec {
@@ -132,9 +142,9 @@ pub fn registry() -> Vec<ModuleSpec> {
             tools: &["aircrack-ng"],
             description: "Offline dictionary analysis of a captured handshake (aircrack-ng) to assess PSK resilience. No transmission.",
             params: vec![
-                p("wordlist", "Wordlist path", true, "/usr/share/wordlists/rockyou.txt"),
-                p("bssid", "Target BSSID", true, "AA:BB:CC:11:22:33"),
-                p("capture", "Capture file", true, "ntool-hs-01.cap"),
+                p("wordlist", "Wordlist path", true, "/usr/share/wordlists/rockyou.txt", ParamKind::Path),
+                p("bssid", "Target BSSID", true, "AA:BB:CC:11:22:33", ParamKind::Mac),
+                p("capture", "Capture file", true, "ntool-hs-01.cap", ParamKind::Path),
             ],
         },
         ModuleSpec {
@@ -146,7 +156,7 @@ pub fn registry() -> Vec<ModuleSpec> {
             disruptive: false,
             tools: &["wash"],
             description: "List WPS-enabled access points in range (wash).",
-            params: vec![p("iface", "Monitor interface", true, "wlan0mon")],
+            params: vec![p("iface", "Monitor interface", true, "wlan0mon", ParamKind::Iface)],
         },
         ModuleSpec {
             id: "wps_attack",
@@ -158,9 +168,9 @@ pub fn registry() -> Vec<ModuleSpec> {
             tools: &["reaver"],
             description: "Assess WPS PIN exposure (reaver). Intrusive — can lock or stress the AP.",
             params: vec![
-                p("iface", "Monitor interface", true, "wlan0mon"),
-                p("bssid", "Target BSSID", true, "AA:BB:CC:11:22:33"),
-                p("channel", "Channel (optional)", false, "6"),
+                p("iface", "Monitor interface", true, "wlan0mon", ParamKind::Iface),
+                p("bssid", "Target BSSID", true, "AA:BB:CC:11:22:33", ParamKind::Mac),
+                p("channel", "Channel (optional)", false, "6", ParamKind::Channel),
             ],
         },
         ModuleSpec {
@@ -173,8 +183,8 @@ pub fn registry() -> Vec<ModuleSpec> {
             tools: &["hcxdumptool"],
             description: "Capture PMKID material (hcxdumptool). Actively associates with APs — treat as intrusive.",
             params: vec![
-                p("iface", "Monitor interface", true, "wlan0mon"),
-                p("out", "Output file", false, "ntool-pmkid.pcapng"),
+                p("iface", "Monitor interface", true, "wlan0mon", ParamKind::Iface),
+                p("out", "Output file", false, "ntool-pmkid.pcapng", ParamKind::Path),
             ],
         },
         ModuleSpec {
@@ -187,9 +197,9 @@ pub fn registry() -> Vec<ModuleSpec> {
             tools: &["airbase-ng"],
             description: "Stand up a rogue AP (airbase-ng) to test client auto-join and evil-twin resistance. Highly disruptive — isolate to a test SSID where possible.",
             params: vec![
-                p("essid", "ESSID to advertise", true, "EvsuCorp"),
-                p("channel", "Channel", true, "6"),
-                p("iface", "Monitor interface", true, "wlan0mon"),
+                p("essid", "ESSID to advertise", true, "EvsuCorp", ParamKind::Essid),
+                p("channel", "Channel", true, "6", ParamKind::Channel),
+                p("iface", "Monitor interface", true, "wlan0mon", ParamKind::Iface),
             ],
         },
     ]
@@ -208,15 +218,21 @@ pub fn gate(
     dry_run: bool,
     confirm: bool,
 ) -> Result<Vec<String>, String> {
-    // Required parameters.
+    // Parameter presence + format validation. An ill-formed value is rejected
+    // even in dry-run mode: there is no useful "preview" of invalid input, and
+    // the whole point of this layer is to stop argument injection before the
+    // operator ever sees the previewed command line.
     for prm in &spec.params {
-        if prm.required {
-            let missing = params
-                .get(prm.key)
-                .map(|s| s.trim().is_empty())
-                .unwrap_or(true);
-            if missing {
-                return Err(format!("missing required parameter: {}", prm.label));
+        match params.get(prm.key).map(|s| s.trim()) {
+            Some(v) if !v.is_empty() => {
+                if let Err(reason) = validate::check(prm.kind, v) {
+                    return Err(format!("invalid {}: {}", prm.label, reason));
+                }
+            }
+            _ => {
+                if prm.required {
+                    return Err(format!("missing required parameter: {}", prm.label));
+                }
             }
         }
     }
@@ -226,7 +242,9 @@ pub fn gate(
     // Authorization gate.
     if !e.active_testing_unlocked() {
         if dry_run {
-            warnings.push("engagement is NOT authorized — preview only; execution is blocked".to_string());
+            warnings.push(
+                "engagement is NOT authorized — preview only; execution is blocked".to_string(),
+            );
         } else {
             return Err(
                 "active testing is LOCKED: record a signed authorization before running modules"
@@ -288,7 +306,10 @@ pub fn build_command(
     params: &std::collections::HashMap<String, String>,
 ) -> (String, Vec<String>) {
     let g = |k: &str| -> String {
-        params.get(k).map(|s| s.trim().to_string()).unwrap_or_default()
+        params
+            .get(k)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
     };
     let or = |k: &str, d: &str| -> String {
         let v = g(k);
@@ -345,7 +366,13 @@ pub fn build_command(
         ),
         "wps_scan" => ("wash".into(), vec!["-i".into(), g("iface")]),
         "wps_attack" => {
-            let mut a = vec!["-i".into(), g("iface"), "-b".into(), g("bssid"), "-vv".into()];
+            let mut a = vec![
+                "-i".into(),
+                g("iface"),
+                "-b".into(),
+                g("bssid"),
+                "-vv".into(),
+            ];
             if !g("channel").is_empty() {
                 a.push("-c".into());
                 a.push(g("channel"));

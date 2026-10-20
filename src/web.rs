@@ -49,7 +49,8 @@ fn handle(mut request: tiny_http::Request) {
 
     let result = match out {
         Out::Html(s) => request.respond(
-            Response::from_string(s).with_header(header("Content-Type", "text/html; charset=utf-8")),
+            Response::from_string(s)
+                .with_header(header("Content-Type", "text/html; charset=utf-8")),
         ),
         Out::Markdown(s) => request.respond(
             Response::from_string(s)
@@ -79,9 +80,7 @@ fn route(method: &Method, segs: &[&str], form: &HashMap<String, String>) -> Out 
         (Method::Get, ["engagement", id, "finding", "new"]) => finding_form(id, None),
         (Method::Post, ["engagement", id, "finding", "new"]) => finding_create(id, form),
         (Method::Get, ["engagement", id, "finding", fid]) => finding_detail(id, fid),
-        (Method::Post, ["engagement", id, "finding", fid, "edit"]) => {
-            finding_update(id, fid, form)
-        }
+        (Method::Post, ["engagement", id, "finding", fid, "edit"]) => finding_update(id, fid, form),
         (Method::Post, ["engagement", id, "finding", fid, "retest"]) => {
             finding_retest(id, fid, form)
         }
@@ -136,7 +135,9 @@ fn index() -> Out {
 }
 
 fn intake_form(existing: Option<&Engagement>) -> String {
-    let e = existing.cloned().unwrap_or_else(|| Engagement::new(String::new()));
+    let e = existing
+        .cloned()
+        .unwrap_or_else(|| Engagement::new(String::new()));
     let action = match existing {
         Some(x) => format!("/engagement/{}/edit", x.id),
         None => "/engagement/new".to_string(),
@@ -317,7 +318,11 @@ fn dashboard(id: &str) -> Out {
     } else {
         findings.push_str("<table><tr><th>Sev</th><th>Title</th><th>Category</th><th>ATT&CK</th><th>Status</th></tr>");
         for f in &e.findings {
-            let auto = if f.auto_detected { " <span class=auto>auto</span>" } else { "" };
+            let auto = if f.auto_detected {
+                " <span class=auto>auto</span>"
+            } else {
+                ""
+            };
             findings.push_str(&format!(
                 "<tr><td><span class=sevtag style='background:{}'>{}</span></td><td><a href='/engagement/{}/finding/{}'>{}</a>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
                 f.severity.color(), f.severity.label(), e.id, f.id, esc(&f.title), auto,
@@ -604,7 +609,16 @@ fn modules_run(id: &str, form: &HashMap<String, String>) -> Out {
             let ec = r.exit_code;
             let so = r.stdout.clone();
             let se = r.stderr.clone();
-            record_action_web(&mut e, &spec, &params, &r.command, false, ec, r.timed_out, summary);
+            record_action_web(
+                &mut e,
+                &spec,
+                &params,
+                &r.command,
+                false,
+                ec,
+                r.timed_out,
+                summary,
+            );
             let _ = store::save(&e);
             module_result(id, &spec, &cmdline, &warnings, ec, &so, &se)
         }
@@ -640,18 +654,25 @@ fn module_result(
         format!(
             "<p class=lbl>Command</p><pre class=term>{}</pre><p class=fmeta>exit: {}</p>",
             esc(cmd),
-            exit.map(|c| c.to_string()).unwrap_or_else(|| "—".to_string())
+            exit.map(|c| c.to_string())
+                .unwrap_or_else(|| "—".to_string())
         )
     };
     let outblock = if stdout.is_empty() {
         String::new()
     } else {
-        format!("<p class=lbl>stdout</p><pre class=term>{}</pre>", esc(stdout))
+        format!(
+            "<p class=lbl>stdout</p><pre class=term>{}</pre>",
+            esc(stdout)
+        )
     };
     let errblock = if stderr.is_empty() {
         String::new()
     } else {
-        format!("<p class=lbl>stderr</p><pre class=term>{}</pre>", esc(stderr))
+        format!(
+            "<p class=lbl>stderr</p><pre class=term>{}</pre>",
+            esc(stderr)
+        )
     };
     let body = format!(
         "<div class=crumb><a href='/engagement/{id}/modules'>← modules</a> · <a href='/engagement/{id}'>dashboard</a></div>\
@@ -701,13 +722,18 @@ fn finding_form(id: &str, existing: Option<&Finding>) -> Out {
         Ok(e) => e,
         Err(_) => return not_found(),
     };
-    let f = existing.cloned().unwrap_or_else(|| Finding::new(String::new()));
+    let f = existing
+        .cloned()
+        .unwrap_or_else(|| Finding::new(String::new()));
     let action = match existing {
         Some(x) => format!("/engagement/{}/finding/{}/edit", id, x.id),
         None => format!("/engagement/{}/finding/new", id),
     };
     let sevs: Vec<&str> = Severity::all().iter().map(|s| s.label()).collect();
-    let stats: Vec<&str> = FindingStatus::all().iter().map(|s| status_value(s)).collect();
+    let stats: Vec<&str> = FindingStatus::all()
+        .iter()
+        .map(|s| status_value(s))
+        .collect();
     let cats = content::finding_categories();
     let tactics = content::attack_tactics();
 
@@ -848,7 +874,9 @@ fn finding_detail(id: &str, fid: &str) -> Out {
     if f.retests.is_empty() {
         retests.push_str("<p class=dim>No retests recorded yet.</p>");
     } else {
-        retests.push_str("<table><tr><th>Date</th><th>Technique</th><th>Result</th><th>Notes</th></tr>");
+        retests.push_str(
+            "<table><tr><th>Date</th><th>Technique</th><th>Result</th><th>Notes</th></tr>",
+        );
         for r in &f.retests {
             retests.push_str(&format!(
                 "<tr><td>{}</td><td>{}</td><td><b>{}</b></td><td>{}</td></tr>",
@@ -905,7 +933,8 @@ fn finding_form_inner(id: &str, f: &Finding) -> String {
 <fieldset><legend>DREAD</legend><div class=grid5>{d}{r}{ex}{a}{di}</div></fieldset>\
 {desc}{ev}{imp}{rem}\
 <div class=actions><button class=btn-primary type=submit>Update finding</button></div></form>",
-        id = id, fid = f.id,
+        id = id,
+        fid = f.id,
         title = inp("title", "Title", &f.title, ""),
         category = sel("category", "Category", cats, &f.category),
         severity = sel("severity", "Severity", &sevs, f.severity.label()),
@@ -915,10 +944,34 @@ fn finding_form_inner(id: &str, f: &Finding) -> String {
         cvss_v = inp("cvss_vector", "CVSS vector", &f.cvss_vector, ""),
         cvss_s = num("cvss_score", "CVSS score", &fmtf(f.cvss_score), "0", "10"),
         d = num("dread_d", "Damage", &f.dread.damage.to_string(), "0", "10"),
-        r = num("dread_r", "Reprod.", &f.dread.reproducibility.to_string(), "0", "10"),
-        ex = num("dread_e", "Exploit.", &f.dread.exploitability.to_string(), "0", "10"),
-        a = num("dread_a", "Affected", &f.dread.affected_users.to_string(), "0", "10"),
-        di = num("dread_di", "Discover.", &f.dread.discoverability.to_string(), "0", "10"),
+        r = num(
+            "dread_r",
+            "Reprod.",
+            &f.dread.reproducibility.to_string(),
+            "0",
+            "10"
+        ),
+        ex = num(
+            "dread_e",
+            "Exploit.",
+            &f.dread.exploitability.to_string(),
+            "0",
+            "10"
+        ),
+        a = num(
+            "dread_a",
+            "Affected",
+            &f.dread.affected_users.to_string(),
+            "0",
+            "10"
+        ),
+        di = num(
+            "dread_di",
+            "Discover.",
+            &f.dread.discoverability.to_string(),
+            "0",
+            "10"
+        ),
         desc = ta("description", "Description", &f.description, 3),
         ev = ta("evidence", "Evidence", &f.evidence, 3),
         imp = ta("impact", "Impact", &f.impact, 2),
@@ -974,7 +1027,10 @@ fn err_page(msg: &str) -> Out {
     Out::Html(layout(
         "Error",
         "",
-        &format!("<h1>Error</h1><p>{}</p><p><a href='/'>← Home</a></p>", esc(msg)),
+        &format!(
+            "<h1>Error</h1><p>{}</p><p><a href='/'>← Home</a></p>",
+            esc(msg)
+        ),
     ))
 }
 

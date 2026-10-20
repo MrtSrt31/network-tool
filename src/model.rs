@@ -99,6 +99,7 @@ impl EngagementStatus {
             EngagementStatus::Closed => "Closed",
         }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "Active" => EngagementStatus::Active,
@@ -228,6 +229,7 @@ impl Severity {
             Severity::Critical => "#f85149",
         }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "Info" => Severity::Info,
@@ -268,6 +270,7 @@ impl FindingStatus {
             FindingStatus::Accepted => "Accepted (risk)",
         }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "Remediating" => FindingStatus::Remediating,
@@ -325,6 +328,7 @@ impl RetestResult {
             RetestResult::Mitigated => "Mitigated",
         }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "Partial" => RetestResult::Partial,

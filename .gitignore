@@ -6,3 +6,8 @@
 # (Default store is ~/.networktool/engagements; override with NETWORKTOOL_DATA.)
 /data
 *.engagement.json
+
+# Internal planning / roadmap / design notes — not for public repo.
+/plan/
+/notes/
+/scratch/
