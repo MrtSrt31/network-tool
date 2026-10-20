@@ -45,7 +45,8 @@ pub fn html(e: &Engagement) -> String {
     let status_banner = if authorized {
         String::new()
     } else {
-        "<div class=draft>DRAFT — authorization not yet recorded. Not valid until signed.</div>".to_string()
+        "<div class=draft>DRAFT — authorization not yet recorded. Not valid until signed.</div>"
+            .to_string()
     };
 
     let company = if e.tester.company.is_empty() {
@@ -210,7 +211,10 @@ pub fn markdown(e: &Engagement) -> String {
 
     s.push_str("## 3. Scope\n\n");
     s.push_str(&format!("- Approach: {}\n", dash(&e.scope.approach)));
-    s.push_str(&format!("- Test windows: {}\n", dash(&e.scope.test_windows)));
+    s.push_str(&format!(
+        "- Test windows: {}\n",
+        dash(&e.scope.test_windows)
+    ));
     s.push_str("\nIn-scope SSIDs:\n");
     s.push_str(&list_lines(&e.scope.in_scope_ssids));
     s.push_str("\nIn-scope BSSIDs:\n");

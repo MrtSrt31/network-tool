@@ -7,18 +7,9 @@
 //! For authorized assessments only. Active testing is gated behind a recorded
 //! authorization per engagement.
 
-mod content;
-mod model;
-mod modules;
-mod recon;
-mod report;
-mod roe;
-mod store;
-mod util;
-mod web;
-
 use clap::{Args, Parser, Subcommand};
-use model::*;
+use network_tool::model::*;
+use network_tool::{model, modules, recon, report, roe, store, web};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
@@ -90,9 +81,7 @@ enum EngAction {
     /// List all engagements.
     List,
     /// Show one engagement.
-    Show {
-        id: String,
-    },
+    Show { id: String },
 }
 
 #[derive(Subcommand)]
@@ -163,6 +152,7 @@ struct RoeArgs {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum ModuleAction {
     /// List available modules.
     List,
@@ -337,7 +327,10 @@ fn run() -> Result<(), Box<dyn Error>> {
                 }
                 e.assets.append(&mut assets);
                 store::save(&e)?;
-                println!("imported {ap} access point(s) and {st} station(s) into {}", e.id);
+                println!(
+                    "imported {ap} access point(s) and {st} station(s) into {}",
+                    e.id
+                );
             }
         },
         Commands::Report(a) => {
@@ -371,7 +364,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         Commands::Module { action } => match action {
             ModuleAction::List => {
                 for m in modules::registry() {
-                    let d = if m.disruptive { "DISRUPTIVE" } else { "passive   " };
+                    let d = if m.disruptive {
+                        "DISRUPTIVE"
+                    } else {
+                        "passive   "
+                    };
                     println!(
                         "{:<12} [{}] {:<28} tools: {}",
                         m.id,
@@ -410,8 +407,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn run_module(a: ModuleRunArgs) -> Result<(), Box<dyn Error>> {
     let mut e = store::load(&a.engagement)?;
-    let spec =
-        modules::find(&a.module).ok_or_else(|| format!("unknown module: {}", a.module))?;
+    let spec = modules::find(&a.module).ok_or_else(|| format!("unknown module: {}", a.module))?;
 
     let mut params: HashMap<String, String> = HashMap::new();
     for (k, v) in [
@@ -442,7 +438,16 @@ fn run_module(a: ModuleRunArgs) -> Result<(), Box<dyn Error>> {
     println!("$ {cmdline}");
 
     if a.dry_run {
-        record_action(&mut e, &spec, &params, &cmdline, true, None, false, "dry-run (not executed)".to_string());
+        record_action(
+            &mut e,
+            &spec,
+            &params,
+            &cmdline,
+            true,
+            None,
+            false,
+            "dry-run (not executed)".to_string(),
+        );
         store::save(&e)?;
         println!("(dry-run — not executed; logged to action trail)");
         return Ok(());
@@ -468,7 +473,16 @@ fn run_module(a: ModuleRunArgs) -> Result<(), Box<dyn Error>> {
     );
 
     let summary = modules::summarize(&r);
-    record_action(&mut e, &spec, &params, &r.command, false, r.exit_code, r.timed_out, summary);
+    record_action(
+        &mut e,
+        &spec,
+        &params,
+        &r.command,
+        false,
+        r.exit_code,
+        r.timed_out,
+        summary,
+    );
     store::save(&e)?;
     Ok(())
 }

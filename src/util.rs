@@ -38,18 +38,16 @@ pub fn urldecode(s: &str) -> String {
                 out.push(b' ');
                 i += 1;
             }
-            b'%' if i + 2 < bytes.len() => {
-                match (hexval(bytes[i + 1]), hexval(bytes[i + 2])) {
-                    (Some(h), Some(l)) => {
-                        out.push(h * 16 + l);
-                        i += 3;
-                    }
-                    _ => {
-                        out.push(b'%');
-                        i += 1;
-                    }
+            b'%' if i + 2 < bytes.len() => match (hexval(bytes[i + 1]), hexval(bytes[i + 2])) {
+                (Some(h), Some(l)) => {
+                    out.push(h * 16 + l);
+                    i += 3;
                 }
-            }
+                _ => {
+                    out.push(b'%');
+                    i += 1;
+                }
+            },
             c => {
                 out.push(c);
                 i += 1;

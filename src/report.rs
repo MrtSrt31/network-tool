@@ -63,7 +63,10 @@ pub fn markdown(e: &Engagement) -> String {
         "- In-scope BSSIDs: {}\n",
         join_or_dash(&e.scope.in_scope_bssids)
     ));
-    s.push_str(&format!("- Test windows: {}\n", dash(&e.scope.test_windows)));
+    s.push_str(&format!(
+        "- Test windows: {}\n",
+        dash(&e.scope.test_windows)
+    ));
     s.push_str(&format!(
         "- Allowed techniques: {}\n",
         join_or_dash(&e.scope.allowed_techniques)
@@ -106,7 +109,12 @@ pub fn markdown(e: &Engagement) -> String {
         s.push_str("_No findings recorded._\n\n");
     } else {
         for (i, f) in e.findings.iter().enumerate() {
-            s.push_str(&format!("### {}. {} [{}]\n\n", i + 1, f.title, f.severity.label()));
+            s.push_str(&format!(
+                "### {}. {} [{}]\n\n",
+                i + 1,
+                f.title,
+                f.severity.label()
+            ));
             s.push_str(&format!("- Category: {}\n", dash(&f.category)));
             s.push_str(&format!(
                 "- ATT&CK: {} {}\n",
@@ -173,7 +181,10 @@ pub fn html(e: &Engagement) -> String {
     let c = e.severity_counts();
     let mut body = String::new();
 
-    body.push_str(&format!("<h1>Wireless Security Assessment — {}</h1>", esc(&e.name)));
+    body.push_str(&format!(
+        "<h1>Wireless Security Assessment — {}</h1>",
+        esc(&e.name)
+    ));
     body.push_str(&format!(
         "<p class=meta><b>Client:</b> {} &nbsp;·&nbsp; <b>Tester:</b> {} ({}) &nbsp;·&nbsp; <b>Date:</b> {} &nbsp;·&nbsp; <b>Status:</b> {}</p>",
         esc(&e.client.name),
@@ -216,7 +227,10 @@ pub fn html(e: &Engagement) -> String {
 
     // Scope
     body.push_str("<h2>Scope</h2><ul>");
-    body.push_str(&format!("<li>Approach: {}</li>", esc(dash(&e.scope.approach))));
+    body.push_str(&format!(
+        "<li>Approach: {}</li>",
+        esc(dash(&e.scope.approach))
+    ));
     body.push_str(&format!(
         "<li>In-scope SSIDs: {}</li>",
         esc(&join_or_dash(&e.scope.in_scope_ssids))
