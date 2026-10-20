@@ -304,20 +304,25 @@ pub fn gate(
         }
     }
 
-    // Scope gate (when a BSSID target is present).
+    // Scope gate for wireless targets (BSSID). The target is in scope when
+    // it matches any entry in scope.in_scope_bssids (full MAC, case
+    // insensitive) OR any entry in scope.in_scope_oui_prefixes (vendor
+    // prefix) — this is how enterprise APs with sequential BSSIDs are
+    // scoped in practice.
     if let Some(bssid) = params.get("bssid") {
         let b = bssid.trim();
         if !b.is_empty() {
-            if e.scope.in_scope_bssids.is_empty() {
-                warnings.push("no in-scope BSSID list defined — scope not enforced".to_string());
+            let have_lists =
+                !e.scope.in_scope_bssids.is_empty() || !e.scope.in_scope_oui_prefixes.is_empty();
+            if !have_lists {
+                warnings
+                    .push("no in-scope BSSID / OUI list defined — scope not enforced".to_string());
             } else {
-                let in_scope = e
-                    .scope
-                    .in_scope_bssids
-                    .iter()
-                    .any(|x| x.trim().eq_ignore_ascii_case(b));
+                let in_scope = crate::scope::mac_matches_any(b, &e.scope.in_scope_bssids)
+                    || crate::scope::mac_matches_any(b, &e.scope.in_scope_oui_prefixes);
                 if !in_scope {
-                    let msg = format!("target {b} is not in the engagement's in-scope BSSID list");
+                    let msg =
+                        format!("target {b} is not in the engagement's in-scope BSSID / OUI list");
                     if dry_run {
                         warnings.push(msg);
                     } else {
@@ -328,18 +333,48 @@ pub fn gate(
         }
     }
 
-    // Scope gate for wired targets (CIDR). P1.1a: exact string match against
-    // scope.in_scope_cidrs. A real subnet-containment matcher is scheduled
-    // for P1.2.
+    // Scope gate for wired targets (CIDR). Real subnet containment: an
+    // allowed `10.0.0.0/16` covers any specific scan of `10.0.5.17` or a
+    // more-specific CIDR like `10.0.5.0/24`.
     if let Some(cidr) = params.get("cidr") {
         let c = cidr.trim();
         if !c.is_empty() {
             if e.scope.in_scope_cidrs.is_empty() {
                 warnings.push("no in-scope CIDR list defined — scope not enforced".to_string());
             } else {
-                let in_scope = e.scope.in_scope_cidrs.iter().any(|x| x.trim() == c);
+                let in_scope = crate::scope::ipv4_in_any(c, &e.scope.in_scope_cidrs);
                 if !in_scope {
                     let msg = format!("target {c} is not in the engagement's in-scope CIDR list");
+                    if dry_run {
+                        warnings.push(msg);
+                    } else {
+                        return Err(msg);
+                    }
+                }
+            }
+        }
+    }
+
+    // Scope gate for SSID targets (evil_twin). The target matches when it
+    // is in scope.in_scope_ssids (exact, case-insensitive) OR matches any
+    // glob in scope.in_scope_ssid_patterns.
+    if let Some(essid) = params.get("essid") {
+        let s = essid.trim();
+        if !s.is_empty() {
+            let have_lists =
+                !e.scope.in_scope_ssids.is_empty() || !e.scope.in_scope_ssid_patterns.is_empty();
+            if !have_lists {
+                warnings.push("no in-scope SSID list defined — scope not enforced".to_string());
+            } else {
+                let in_scope = e
+                    .scope
+                    .in_scope_ssids
+                    .iter()
+                    .any(|x| x.trim().eq_ignore_ascii_case(s))
+                    || crate::scope::ssid_matches_any(s, &e.scope.in_scope_ssid_patterns);
+                if !in_scope {
+                    let msg =
+                        format!("target SSID {s} is not in the engagement's in-scope SSID list");
                     if dry_run {
                         warnings.push(msg);
                     } else {

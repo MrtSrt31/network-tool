@@ -142,10 +142,21 @@ pub struct Scope {
     pub in_scope_ssids: Vec<String>,
     pub in_scope_bssids: Vec<String>,
     /// IPv4 CIDRs (or single IPs) authorised for wired-side modules.
-    /// P1.1a: compared as exact strings against the module's `cidr` parameter;
-    /// a real subnet-containment matcher is P1.2.
+    /// Matched by real subnet containment: a target `10.0.5.17` matches an
+    /// allowed `10.0.0.0/16`; a target CIDR must be at least as specific as
+    /// an allowed CIDR to match (`10.0.0.0/16` does not fit inside
+    /// `10.0.0.0/24`).
     #[serde(default)]
     pub in_scope_cidrs: Vec<String>,
+    /// OUI (vendor prefix) tokens like `AA:BB:CC`. A target BSSID matches
+    /// an entry here when its first three octets match the entry. Used for
+    /// enterprise APs with sequential BSSIDs.
+    #[serde(default)]
+    pub in_scope_oui_prefixes: Vec<String>,
+    /// SSID glob patterns (`EvsuCorp-*`, `Guest-??`). Case-insensitive, `*`
+    /// is any run, `?` is one character.
+    #[serde(default)]
+    pub in_scope_ssid_patterns: Vec<String>,
     pub out_of_scope_notes: String,
     pub test_windows: String,
     pub allowed_techniques: Vec<String>,
