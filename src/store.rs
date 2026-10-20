@@ -16,6 +16,7 @@
 //!
 //! Override the data location with the `NETWORKTOOL_DATA` env variable.
 
+use crate::audit;
 use crate::model::Engagement;
 use std::fmt;
 use std::fs;
@@ -138,6 +139,13 @@ pub fn save(e: &mut Engagement) -> Result<(), SaveError> {
                 incoming: e.version,
             });
         }
+    }
+
+    // Transparently seal any legacy action-log entries (pre-P0.5 engagements
+    // whose actions have empty prev_hash/hash). This runs at most once per
+    // engagement after the upgrade.
+    if audit::has_legacy_entries(e) {
+        audit::reseal_chain(e);
     }
 
     // Commit the next version atomically: write a tmp file, then rename it

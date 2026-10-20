@@ -53,6 +53,11 @@ enum Commands {
         #[command(subcommand)]
         action: ModuleAction,
     },
+    /// Audit-log integrity: verify the hash chain over an engagement's action log.
+    Audit {
+        #[command(subcommand)]
+        action: AuditAction,
+    },
 }
 
 #[derive(Args)]
@@ -149,6 +154,25 @@ struct RoeArgs {
     /// Write to this file instead of stdout.
     #[arg(long)]
     out: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum AuditAction {
+    /// Walk the action-log hash chain and report the first broken entry (or OK).
+    Verify {
+        /// Engagement id.
+        id: String,
+    },
+    /// Print the current hash chain head for an engagement.
+    Head {
+        /// Engagement id.
+        id: String,
+    },
+    /// Re-seal every entry in the log (use after a manual migration or recovery).
+    Reseal {
+        /// Engagement id.
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -401,6 +425,36 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
             ModuleAction::Run(a) => run_module(a)?,
         },
+        Commands::Audit { action } => match action {
+            AuditAction::Verify { id } => {
+                let e = store::load(&id)?;
+                match network_tool::audit::verify_action_log(&e) {
+                    Ok(()) => {
+                        let head = network_tool::audit::chain_head(&e);
+                        println!("OK — audit chain verifies ({} entries)", e.action_log.len());
+                        println!("head: {head}");
+                    }
+                    Err(br) => {
+                        eprintln!("FAIL — chain breaks at index {}: {}", br.index, br.reason);
+                        std::process::exit(2);
+                    }
+                }
+            }
+            AuditAction::Head { id } => {
+                let e = store::load(&id)?;
+                println!("{}", network_tool::audit::chain_head(&e));
+            }
+            AuditAction::Reseal { id } => {
+                let mut e = store::load(&id)?;
+                network_tool::audit::reseal_chain(&mut e);
+                store::save(&mut e)?;
+                println!(
+                    "re-sealed {} entries; new head: {}",
+                    e.action_log.len(),
+                    network_tool::audit::chain_head(&e)
+                );
+            }
+        },
     }
     Ok(())
 }
@@ -511,7 +565,7 @@ fn record_action(
         .cloned()
         .unwrap_or_default();
     let operator = e.tester.name.clone();
-    e.action_log.push(ActionRun {
+    let action = ActionRun {
         id: model::new_id(),
         at: chrono::Utc::now(),
         module_id: spec.id.to_string(),
@@ -524,7 +578,11 @@ fn record_action(
         timed_out,
         summary,
         operator,
-    });
+        prev_hash: String::new(),
+        hash: String::new(),
+    };
+    let sealed = network_tool::audit::seal_new_action(e, action);
+    e.action_log.push(sealed);
 }
 
 fn print_engagement(e: &Engagement) {
