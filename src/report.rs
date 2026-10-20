@@ -116,10 +116,19 @@ pub fn markdown(e: &Engagement) -> String {
                 f.severity.label()
             ));
             s.push_str(&format!("- Category: {}\n", dash(&f.category)));
+            let tech_md = if f.technique_id.trim().is_empty() {
+                "—".to_string()
+            } else {
+                format!(
+                    "[{}]({})",
+                    f.technique_id,
+                    content::attack_technique_url(f.technique_id.trim())
+                )
+            };
             s.push_str(&format!(
                 "- ATT&CK: {} {}\n",
                 dash(&f.attack_tactic),
-                f.technique_id
+                tech_md
             ));
             s.push_str(&format!(
                 "- CVSS: {} ({:.1})\n",
@@ -295,11 +304,20 @@ pub fn html(e: &Engagement) -> String {
                 i + 1,
                 esc(&f.title),
             ));
+            let tech_html = if f.technique_id.trim().is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<a href='{}' target='_blank' rel='noopener'>{}</a>",
+                    esc(&content::attack_technique_url(f.technique_id.trim())),
+                    esc(&f.technique_id)
+                )
+            };
             body.push_str(&format!(
                 "<p class=fmeta>Category: {} · ATT&amp;CK: {} {} · CVSS: {} ({:.1}) · DREAD: {:.1}/10 · Asset: {} · Status: {}</p>",
                 esc(dash(&f.category)),
                 esc(dash(&f.attack_tactic)),
-                esc(&f.technique_id),
+                tech_html,
                 esc(dash(&f.cvss_vector)),
                 f.cvss_score,
                 f.dread.score(),

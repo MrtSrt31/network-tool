@@ -167,6 +167,48 @@ fn roe_html_drops_draft_banner_once_authorized() {
     assert!(html.contains("ROE-123"));
 }
 
+// ---------- ATT&CK technique links (P1.6) ----------
+
+#[test]
+fn report_markdown_links_technique_id_to_mitre() {
+    let e = populated_engagement();
+    let md = report::markdown(&e);
+    // populated_engagement sets technique_id = "T1110"
+    assert!(md.contains("[T1110]"));
+    assert!(md.contains("https://attack.mitre.org/techniques/T1110/"));
+}
+
+#[test]
+fn report_html_links_technique_id_to_mitre() {
+    let e = populated_engagement();
+    let html = report::html(&e);
+    assert!(html.contains("https://attack.mitre.org/techniques/T1110/"));
+    assert!(html.contains("target='_blank'"));
+}
+
+#[test]
+fn report_handles_empty_technique_id_gracefully() {
+    let mut e = populated_engagement();
+    for f in &mut e.findings {
+        f.technique_id = String::new();
+    }
+    let md = report::markdown(&e);
+    let html = report::html(&e);
+    // No panic, no stray broken link.
+    assert!(!md.contains("[]("));
+    assert!(!html.contains("href='https://attack.mitre.org/techniques//'"));
+}
+
+#[test]
+fn report_handles_subtechnique_url_correctly() {
+    let mut e = populated_engagement();
+    for f in &mut e.findings {
+        f.technique_id = "T1557.001".into();
+    }
+    let md = report::markdown(&e);
+    assert!(md.contains("https://attack.mitre.org/techniques/T1557/001/"));
+}
+
 #[test]
 fn roe_markdown_renders_without_panic() {
     let e = populated_engagement();

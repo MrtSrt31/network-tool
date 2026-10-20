@@ -2,6 +2,57 @@
 //! the hardening/remediation matrix, and controlled vocabularies used by both the
 //! GUI dropdowns and the generated report appendices.
 
+/// MITRE ATT&CK techniques relevant to wireless and wired-LAN assessments.
+/// Each entry is `(id, name, tactic)`. `id` is what gets stored in a Finding;
+/// `name` and `tactic` drive the finding form's datalist and the report's
+/// human-readable column.
+pub fn attack_techniques() -> &'static [(&'static str, &'static str, &'static str)] {
+    &[
+        ("T1595", "Active Scanning", "Reconnaissance"),
+        ("T1595.001", "Scanning IP Blocks", "Reconnaissance"),
+        ("T1595.002", "Vulnerability Scanning", "Reconnaissance"),
+        ("T1046", "Network Service Discovery", "Discovery"),
+        ("T1018", "Remote System Discovery", "Discovery"),
+        ("T1087", "Account Discovery", "Discovery"),
+        ("T1135", "Network Share Discovery", "Discovery"),
+        (
+            "T1016",
+            "System Network Configuration Discovery",
+            "Discovery",
+        ),
+        ("T1200", "Hardware Additions", "Initial Access"),
+        ("T1078", "Valid Accounts", "Initial Access"),
+        ("T1557", "Adversary-in-the-Middle", "Credential Access"),
+        (
+            "T1557.001",
+            "LLMNR/NBT-NS Poisoning and SMB Relay",
+            "Credential Access",
+        ),
+        ("T1557.002", "ARP Cache Poisoning", "Credential Access"),
+        ("T1557.004", "Evil Twin", "Credential Access"),
+        ("T1110", "Brute Force", "Credential Access"),
+        ("T1110.001", "Password Guessing", "Credential Access"),
+        ("T1110.002", "Password Cracking", "Credential Access"),
+        ("T1040", "Network Sniffing", "Credential Access"),
+        ("T1498", "Network Denial of Service", "Impact"),
+        (
+            "T1562.004",
+            "Impair Defenses: Disable or Modify System Firewall",
+            "Defense Evasion",
+        ),
+        ("T1021", "Remote Services", "Lateral Movement"),
+        ("T1021.002", "SMB/Windows Admin Shares", "Lateral Movement"),
+    ]
+}
+
+/// MITRE link for a technique id (handles sub-techniques like `T1557.001`).
+pub fn attack_technique_url(id: &str) -> String {
+    match id.split_once('.') {
+        Some((base, sub)) => format!("https://attack.mitre.org/techniques/{base}/{sub}/"),
+        None => format!("https://attack.mitre.org/techniques/{id}/"),
+    }
+}
+
 /// MITRE ATT&CK tactics most relevant to wireless assessments.
 pub fn attack_tactics() -> &'static [&'static str] {
     &[
