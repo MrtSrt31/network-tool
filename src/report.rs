@@ -233,6 +233,28 @@ pub fn markdown(e: &Engagement) -> String {
             if !f.remediation.is_empty() {
                 s.push_str(&format!("**Remediation.** {}\n\n", f.remediation));
             }
+            if !f.evidence_items.is_empty() {
+                s.push_str("**Structured evidence (SHA-256 sealed).**\n\n");
+                for item in &f.evidence_items {
+                    s.push_str(&format!(
+                        "- `{}` · note: {} · sha256: `{}`\n\n",
+                        item.captured_at.format("%Y-%m-%dT%H:%MZ"),
+                        if item.note.is_empty() {
+                            "—"
+                        } else {
+                            &item.note
+                        },
+                        item.sha256,
+                    ));
+                    s.push_str("  ```\n");
+                    for line in item.content.lines() {
+                        s.push_str("  ");
+                        s.push_str(line);
+                        s.push('\n');
+                    }
+                    s.push_str("  ```\n\n");
+                }
+            }
             if !f.evidence_action_runs.is_empty() {
                 s.push_str("**Linked actions (audit chain evidence).**\n\n");
                 for aid in &f.evidence_action_runs {
@@ -429,6 +451,22 @@ pub fn html(e: &Engagement) -> String {
             push_para(&mut body, "Evidence", &f.evidence);
             push_para(&mut body, "Impact", &f.impact);
             push_para(&mut body, "Remediation", &f.remediation);
+            if !f.evidence_items.is_empty() {
+                body.push_str("<p class=lbl>Structured evidence (SHA-256 sealed)</p>");
+                for item in &f.evidence_items {
+                    body.push_str(&format!(
+                        "<p class=mono><b>{}</b> · note: {} · sha256: {}</p><pre>{}</pre>",
+                        item.captured_at.format("%Y-%m-%dT%H:%MZ"),
+                        esc(if item.note.is_empty() {
+                            "—"
+                        } else {
+                            &item.note
+                        }),
+                        esc(&item.sha256),
+                        esc(&item.content),
+                    ));
+                }
+            }
             if !f.evidence_action_runs.is_empty() {
                 body.push_str("<p class=lbl>Linked actions (audit chain evidence)</p><ul>");
                 for aid in &f.evidence_action_runs {

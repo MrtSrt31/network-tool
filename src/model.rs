@@ -429,6 +429,23 @@ pub struct Finding {
     /// invocations behind it. Serde default empty for backward compat.
     #[serde(default)]
     pub evidence_action_runs: Vec<String>,
+    /// Structured evidence snippets attached to this finding. Each item is
+    /// an operator-provided text block plus its SHA-256 digest, timestamp
+    /// and a short note. File uploads land in a follow-up (P1.4b).
+    #[serde(default)]
+    pub evidence_items: Vec<EvidenceItem>,
+}
+
+/// A text snippet (log excerpt, tool output, screenshot caption) attached
+/// to a finding. The SHA-256 of the content is stored alongside so a
+/// reviewer can confirm the snippet has not been edited since capture.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct EvidenceItem {
+    pub id: String,
+    pub note: String,
+    pub content: String,
+    pub sha256: String,
+    pub captured_at: DateTime<Utc>,
 }
 
 impl Finding {
@@ -453,6 +470,27 @@ impl Finding {
             created_at: Utc::now(),
             auto_detected: false,
             evidence_action_runs: vec![],
+            evidence_items: vec![],
+        }
+    }
+}
+
+impl EvidenceItem {
+    /// Build an `EvidenceItem` from a note + content block, computing the
+    /// SHA-256 of the content automatically.
+    pub fn new(note: String, content: String) -> Self {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(content.as_bytes());
+        let mut hex = String::with_capacity(64);
+        for b in digest {
+            hex.push_str(&format!("{b:02x}"));
+        }
+        EvidenceItem {
+            id: new_id(),
+            note,
+            content,
+            sha256: hex,
+            captured_at: Utc::now(),
         }
     }
 }

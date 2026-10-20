@@ -4,8 +4,8 @@
 
 use network_tool::audit;
 use network_tool::model::{
-    ActionRun, AssetKind, Authorization, Dread, Engagement, Finding, FindingStatus, Scope,
-    Severity, WirelessAsset,
+    ActionRun, AssetKind, Authorization, Dread, Engagement, EvidenceItem, Finding, FindingStatus,
+    Scope, Severity, WirelessAsset,
 };
 use network_tool::{report, roe};
 
@@ -165,6 +165,48 @@ fn roe_html_drops_draft_banner_once_authorized() {
     );
     assert!(html.contains("Client CISO"));
     assert!(html.contains("ROE-123"));
+}
+
+// ---------- Structured evidence items (P1.4a) ----------
+
+#[test]
+fn evidence_item_computes_sha256_automatically() {
+    let item = EvidenceItem::new("handshake".into(), "aircrack-ng output\n".into());
+    // sha256("aircrack-ng output\n") — verified separately with `shasum`.
+    assert_eq!(item.sha256.len(), 64);
+    assert!(item.sha256.chars().all(|c| c.is_ascii_hexdigit()));
+    // Deterministic: hashing the same content twice yields the same digest.
+    let item2 = EvidenceItem::new("".into(), "aircrack-ng output\n".into());
+    assert_eq!(item.sha256, item2.sha256);
+}
+
+#[test]
+fn report_markdown_includes_evidence_items() {
+    let mut e = populated_engagement();
+    e.findings[0].evidence_items.push(EvidenceItem::new(
+        "tcpdump".into(),
+        "0.0.0.0.80 > 1.2.3.4.443".into(),
+    ));
+    let md = report::markdown(&e);
+    assert!(md.contains("Structured evidence"));
+    assert!(md.contains("tcpdump"));
+    assert!(md.contains("0.0.0.0.80 > 1.2.3.4.443"));
+    // SHA-256 is present as a 64-char hex substring.
+    let digest = &e.findings[0].evidence_items[0].sha256;
+    assert!(md.contains(digest.as_str()));
+}
+
+#[test]
+fn report_html_includes_evidence_items_and_escapes_html() {
+    let mut e = populated_engagement();
+    e.findings[0].evidence_items.push(EvidenceItem::new(
+        "note".into(),
+        "<script>alert(1)</script>".into(),
+    ));
+    let html = report::html(&e);
+    assert!(html.contains("Structured evidence"));
+    assert!(!html.contains("<script>alert(1)</script>"));
+    assert!(html.contains("&lt;script&gt;"));
 }
 
 // ---------- Report tamper-evidence (P1.10) ----------
