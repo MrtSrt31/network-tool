@@ -1,12 +1,17 @@
-//! Local web GUI (control panel). Single-threaded tiny_http server bound to
-//! 127.0.0.1 only. Renders the engagement intake screen, dashboard, findings,
-//! recon import, and report views.
+//! Local web GUI (control panel). tiny_http server bound to `127.0.0.1` with
+//! thread-per-request dispatch; auth is enforced by the [`auth`] middleware
+//! (session token + CSRF + loopback-Origin check).
+
+pub mod auth;
 
 use crate::model::*;
 use crate::util::*;
 use crate::{content, modules, recon, report, roe, store};
 use std::collections::HashMap;
+use std::thread;
 use tiny_http::{Header, Method, Response, Server};
+
+use auth::AuthDecision;
 
 enum Out {
     Html(String),
@@ -20,15 +25,21 @@ pub fn serve(port: u16, open: bool) -> Result<(), Box<dyn std::error::Error>> {
         Ok(s) => s,
         Err(e) => return Err(format!("could not bind {addr}: {e}").into()),
     };
-    println!("Network Tool GUI  →  http://{addr}");
+    let token = auth::init_session(&store::data_dir())?;
+    let authenticated_url = format!("http://{addr}/?s={token}");
+    println!("Network Tool GUI  →  {authenticated_url}");
     println!("(authorized assessments only · Ctrl-C to stop)");
+    println!(
+        "session token persisted in {}",
+        store::data_dir().join(".session").display()
+    );
     if open {
         let _ = std::process::Command::new("open")
-            .arg(format!("http://{addr}"))
+            .arg(&authenticated_url)
             .spawn();
     }
     for request in server.incoming_requests() {
-        handle(request);
+        thread::spawn(move || handle(request));
     }
     Ok(())
 }
@@ -36,33 +47,75 @@ pub fn serve(port: u16, open: bool) -> Result<(), Box<dyn std::error::Error>> {
 fn handle(mut request: tiny_http::Request) {
     let method = request.method().clone();
     let raw_url = request.url().to_string();
+
+    // Collect headers before consuming the request body.
+    let mut cookie_header = String::new();
+    let mut origin_header: Option<String> = None;
+    for h in request.headers() {
+        let name = h.field.as_str().as_str().to_ascii_lowercase();
+        match name.as_str() {
+            "cookie" => {
+                if !cookie_header.is_empty() {
+                    cookie_header.push_str("; ");
+                }
+                cookie_header.push_str(h.value.as_str());
+            }
+            "origin" => origin_header = Some(h.value.as_str().to_string()),
+            _ => {}
+        }
+    }
+    let cookies = auth::parse_cookies(&cookie_header);
+    let query = auth::parse_query(&raw_url);
+
     let mut body = String::new();
     if method == Method::Post {
         let _ = request.as_reader().read_to_string(&mut body);
     }
     let form = parse_form(&body);
 
+    let is_post = method == Method::Post;
+    let decision = auth::check_auth(
+        is_post,
+        &cookies,
+        &query,
+        &form,
+        origin_header.as_deref(),
+        auth::token(),
+    );
+
+    let set_cookie = match decision {
+        AuthDecision::Deny(reason) => {
+            let _ = request.respond(
+                Response::from_string(format!("403 forbidden: {reason}"))
+                    .with_status_code(403)
+                    .with_header(header("Content-Type", "text/plain; charset=utf-8")),
+            );
+            return;
+        }
+        AuthDecision::Allow { set_cookie } => set_cookie,
+    };
+
     let path = raw_url.split('?').next().unwrap_or("");
     let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
 
     let out = route(&method, &segs, &form);
 
-    let result = match out {
-        Out::Html(s) => request.respond(
-            Response::from_string(s)
-                .with_header(header("Content-Type", "text/html; charset=utf-8")),
-        ),
-        Out::Markdown(s) => request.respond(
-            Response::from_string(s)
-                .with_header(header("Content-Type", "text/plain; charset=utf-8")),
-        ),
-        Out::Redirect(loc) => request.respond(
-            Response::from_string("")
-                .with_status_code(303)
-                .with_header(header("Location", &loc)),
-        ),
+    let mut response = match out {
+        Out::Html(s) => Response::from_string(s)
+            .with_header(header("Content-Type", "text/html; charset=utf-8"))
+            .boxed(),
+        Out::Markdown(s) => Response::from_string(s)
+            .with_header(header("Content-Type", "text/plain; charset=utf-8"))
+            .boxed(),
+        Out::Redirect(loc) => Response::from_string("")
+            .with_status_code(303)
+            .with_header(header("Location", &loc))
+            .boxed(),
     };
-    let _ = result;
+    if let Some(sc) = set_cookie {
+        response.add_header(header("Set-Cookie", &sc));
+    }
+    let _ = request.respond(response);
 }
 
 fn route(method: &Method, segs: &[&str], form: &HashMap<String, String>) -> Out {
@@ -153,7 +206,7 @@ fn intake_form(existing: Option<&Engagement>) -> String {
 
     let body = format!(
         "<h1>{title}</h1>\
-<form method=post action='{action}' class=form>\
+<form method=post action='{action}' class=form>{csrf}\
 <fieldset><legend>Engagement</legend>\
 {name}{status}</fieldset>\
 <fieldset><legend>Tester (person performing the assessment)</legend>\
@@ -169,6 +222,7 @@ fn intake_form(existing: Option<&Engagement>) -> String {
 </form>",
         title = esc(title),
         action = action,
+        csrf = auth::csrf_field(),
         name = inp("name", "Engagement name", &e.name, "e.g. Evsu — Wireless Assessment 2026"),
         status = sel("status", "Status", &statuses, e.status.label()),
         t_name = inp("tester_name", "Full name", &e.tester.name, ""),
@@ -393,12 +447,13 @@ fn recon_page(id: &str) -> Out {
         "<div class=crumb><a href='/engagement/{id}'>← dashboard</a></div>\
 <h1>Import reconnaissance</h1>\
 <p class=note>Paste an <code>airodump-ng</code> CSV capture. This is a passive import — it parses a file you already captured and builds the asset inventory. No transmission is performed.</p>\
-<form method=post action='/engagement/{id}/recon' class=form>\
+<form method=post action='/engagement/{id}/recon' class=form>{csrf}\
 {ta}\
 {derive}{scope}\
 <div class=actions><button class=btn-primary type=submit>Import</button> <a class=btn href='/engagement/{id}'>Cancel</a></div>\
 </form>",
         id = id,
+        csrf = auth::csrf_field(),
         ta = ta("csv", "airodump-ng CSV", "", 14),
         derive = chk("derive", "Auto-suggest draft findings from obvious weaknesses (WEP/open/legacy WPA/PSK)", true),
         scope = chk("mark_scope", "Mark all imported access points as in-scope", false),
@@ -501,7 +556,7 @@ fn modules_page(id: &str) -> Out {
             "<div class=finding><h3>{disr}{name}</h3>\
 <p class=fmeta>{cat} · ATT&amp;CK: {tactic} {tech} · tools: {tools}</p>\
 <p>{desc}</p>\
-<form method=post action='/engagement/{id}/modules/run' class=form>\
+<form method=post action='/engagement/{id}/modules/run' class=form>{csrf}\
 <input type=hidden name=module value='{mid}'>\
 {fields}\
 <label>Timeout (seconds, 0 = none)<input type=number name=timeout value='{to}' min=0></label>\
@@ -515,6 +570,7 @@ fn modules_page(id: &str) -> Out {
             tools = tools_html.join(" "),
             desc = esc(m.description),
             id = id,
+            csrf = auth::csrf_field(),
             mid = m.id,
             fields = fields,
             to = if m.disruptive { "30" } else { "120" },
@@ -752,7 +808,7 @@ fn finding_form(id: &str, existing: Option<&Finding>) -> Out {
     let body = format!(
         "<div class=crumb><a href='/engagement/{id}'>← dashboard</a></div>\
 <h1>{heading}</h1>\
-<form method=post action='{action}' class=form>\
+<form method=post action='{action}' class=form>{csrf}\
 {title}\
 <div class=grid3>{category}{severity}{status}</div>\
 <div class=grid3>{tactic}{technique}{cvss_v}</div>\
@@ -764,6 +820,7 @@ fn finding_form(id: &str, existing: Option<&Finding>) -> Out {
         id = id,
         heading = if existing.is_some() { "Edit finding" } else { "Add finding" },
         action = action,
+        csrf = auth::csrf_field(),
         title = inp("title", "Title", &f.title, ""),
         category = sel("category", "Category", cats, &f.category),
         severity = sel("severity", "Severity", &sevs, f.severity.label()),
@@ -899,11 +956,12 @@ fn finding_detail(id: &str, fid: &str) -> Out {
 <p class=lbl>Impact</p><p>{imp}</p>\
 <p class=lbl>Remediation</p><p>{rem}</p></div>\
 <h2>Iterative retest</h2>{retests}\
-<form method=post action='/engagement/{id}/finding/{fid}/retest' class=form>\
+<form method=post action='/engagement/{id}/finding/{fid}/retest' class=form>{csrf}\
 <div class=grid3>{r_date}{r_tech}{r_result}</div>{r_notes}\
 <div class=actions><button class=btn-primary type=submit>Record retest</button></div></form>\
 <details class=editwrap><summary>Edit this finding</summary>{editform}</details>",
         id = id, fid = fid,
+        csrf = auth::csrf_field(),
         color = f.severity.color(), sev = f.severity.label(), title = esc(&f.title),
         cat = esc(dash(&f.category)), tactic = esc(dash(&f.attack_tactic)), tech = esc(&f.technique_id),
         cvssv = esc(dash(&f.cvss_vector)), cvsss = f.cvss_score, dread = f.dread.score(), status = f.status.label(),
@@ -927,7 +985,7 @@ fn finding_form_inner(id: &str, f: &Finding) -> String {
     let cats = content::finding_categories();
     let tactics = content::attack_tactics();
     format!(
-        "<form method=post action='/engagement/{id}/finding/{fid}/edit' class=form>\
+        "<form method=post action='/engagement/{id}/finding/{fid}/edit' class=form>{csrf}\
 {title}<div class=grid3>{category}{severity}{status}</div>\
 <div class=grid3>{tactic}{technique}{cvss_v}</div>{cvss_s}\
 <fieldset><legend>DREAD</legend><div class=grid5>{d}{r}{ex}{a}{di}</div></fieldset>\
@@ -935,6 +993,7 @@ fn finding_form_inner(id: &str, f: &Finding) -> String {
 <div class=actions><button class=btn-primary type=submit>Update finding</button></div></form>",
         id = id,
         fid = f.id,
+        csrf = auth::csrf_field(),
         title = inp("title", "Title", &f.title, ""),
         category = sel("category", "Category", cats, &f.category),
         severity = sel("severity", "Severity", &sevs, f.severity.label()),
