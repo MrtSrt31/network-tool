@@ -824,6 +824,18 @@ fn finding_form(id: &str, existing: Option<&Finding>) -> Out {
         dl.push_str(&format!("<option value='{}'>", esc(&v)));
     }
     dl.push_str("</datalist>");
+    // ATT&CK technique datalist — operator picks from the list or types a
+    // technique id manually (the dropdown is a hint, not a hard constraint).
+    dl.push_str("<datalist id=techniques>");
+    for (tid, name, tactic) in content::attack_techniques() {
+        dl.push_str(&format!(
+            "<option value='{}'>{} — {}</option>",
+            esc(tid),
+            esc(name),
+            esc(tactic)
+        ));
+    }
+    dl.push_str("</datalist>");
 
     let body = format!(
         "<div class=crumb><a href='/engagement/{id}'>← dashboard</a></div>\
@@ -846,7 +858,7 @@ fn finding_form(id: &str, existing: Option<&Finding>) -> Out {
         severity = sel("severity", "Severity", &sevs, f.severity.label()),
         status = sel("status", "Status", &stats, status_value(&f.status)),
         tactic = sel("tactic", "ATT&CK tactic", tactics, &f.attack_tactic),
-        technique = inp("technique_id", "Technique id", &f.technique_id, "e.g. T1557"),
+        technique = inp_list("technique_id", "ATT&CK technique id", &f.technique_id, "techniques"),
         cvss_v = inp("cvss_vector", "CVSS vector", &f.cvss_vector, "CVSS:3.1/..."),
         cvss_s = num("cvss_score", "CVSS score", &fmtf(f.cvss_score), "0", "10"),
         asset = inp_list("affected_asset", "Affected asset", &f.affected_asset, "assets"),
@@ -992,7 +1004,7 @@ fn finding_detail(id: &str, fid: &str) -> Out {
         id = id, fid = fid,
         csrf = auth::csrf_field(),
         color = f.severity.color(), sev = f.severity.label(), title = esc(&f.title),
-        cat = esc(dash(&f.category)), tactic = esc(dash(&f.attack_tactic)), tech = esc(&f.technique_id),
+        cat = esc(dash(&f.category)), tactic = esc(dash(&f.attack_tactic)), tech = technique_link(&f.technique_id),
         cvssv = esc(dash(&f.cvss_vector)), cvsss = f.cvss_score, dread = f.dread.score(), status = f.status.label(),
         desc = esc(dash(&f.description)), ev = esc(dash(&f.evidence)), imp = esc(dash(&f.impact)), rem = esc(dash(&f.remediation)),
         r_date = inp("r_date", "Date", "", "YYYY-MM-DD"),
@@ -1013,8 +1025,18 @@ fn finding_form_inner(id: &str, f: &Finding) -> String {
     let stats: Vec<&str> = FindingStatus::all().iter().map(status_value).collect();
     let cats = content::finding_categories();
     let tactics = content::attack_tactics();
+    let mut techniques_dl = String::from("<datalist id=techniques>");
+    for (tid, name, tactic) in content::attack_techniques() {
+        techniques_dl.push_str(&format!(
+            "<option value='{}'>{} — {}</option>",
+            esc(tid),
+            esc(name),
+            esc(tactic)
+        ));
+    }
+    techniques_dl.push_str("</datalist>");
     format!(
-        "<form method=post action='/engagement/{id}/finding/{fid}/edit' class=form>{csrf}\
+        "{techniques_dl}<form method=post action='/engagement/{id}/finding/{fid}/edit' class=form>{csrf}\
 {title}<div class=grid3>{category}{severity}{status}</div>\
 <div class=grid3>{tactic}{technique}{cvss_v}</div>{cvss_s}\
 <fieldset><legend>DREAD</legend><div class=grid5>{d}{r}{ex}{a}{di}</div></fieldset>\
@@ -1028,7 +1050,7 @@ fn finding_form_inner(id: &str, f: &Finding) -> String {
         severity = sel("severity", "Severity", &sevs, f.severity.label()),
         status = sel("status", "Status", &stats, status_value(&f.status)),
         tactic = sel("tactic", "ATT&CK tactic", tactics, &f.attack_tactic),
-        technique = inp("technique_id", "Technique id", &f.technique_id, ""),
+        technique = inp_list("technique_id", "ATT&CK technique id", &f.technique_id, "techniques"),
         cvss_v = inp("cvss_vector", "CVSS vector", &f.cvss_vector, ""),
         cvss_s = num("cvss_score", "CVSS score", &fmtf(f.cvss_score), "0", "10"),
         d = num("dread_d", "Damage", &f.dread.damage.to_string(), "0", "10"),
@@ -1185,6 +1207,38 @@ fn inp(name: &str, label: &str, value: &str, ph: &str) -> String {
         esc(ph)
     )
 }
+/// Render an ATT&CK technique id as a MITRE link, with sensible fallbacks
+/// for empty / malformed ids (so the detail page doesn't produce a broken
+/// link). Validates the id with a very narrow regex-free pattern
+/// (`T\d+` or `T\d+\.\d+`) — anything else is shown as plain text.
+fn technique_link(id: &str) -> String {
+    let s = id.trim();
+    if s.is_empty() {
+        return "—".into();
+    }
+    let valid_shape = s.starts_with('T') && {
+        let rest = &s[1..];
+        match rest.split_once('.') {
+            Some((base, sub)) => {
+                !base.is_empty()
+                    && base.chars().all(|c| c.is_ascii_digit())
+                    && !sub.is_empty()
+                    && sub.chars().all(|c| c.is_ascii_digit())
+            }
+            None => !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()),
+        }
+    };
+    if valid_shape {
+        format!(
+            "<a href='{}' target='_blank' rel='noopener'>{}</a>",
+            esc(&content::attack_technique_url(s)),
+            esc(s)
+        )
+    } else {
+        esc(s)
+    }
+}
+
 fn inp_list(name: &str, label: &str, value: &str, list: &str) -> String {
     format!(
         "<label>{}<input name='{}' value='{}' list='{}'></label>",
