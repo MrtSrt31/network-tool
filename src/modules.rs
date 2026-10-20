@@ -190,6 +190,20 @@ pub fn registry() -> Vec<ModuleSpec> {
             ],
         },
         ModuleSpec {
+            id: "arp_discovery",
+            name: "ARP sweep (arp-scan)",
+            category: "Network Segmentation",
+            tactic: "Discovery",
+            technique: "T1018",
+            disruptive: false,
+            tools: &["arp-scan"],
+            description: "Discover live hosts on a wired subnet via ARP requests (arp-scan). Low-noise and fast; use before nmap_scan to focus on live hosts only.",
+            params: vec![
+                p("iface", "Interface", true, "eth0", ParamKind::Iface),
+                p("cidr", "Target CIDR (omit for --localnet)", false, "10.0.0.0/24", ParamKind::Cidr),
+            ],
+        },
+        ModuleSpec {
             id: "nmap_scan",
             name: "Wired host discovery + port scan (nmap)",
             category: "Network Segmentation",
@@ -428,6 +442,17 @@ pub fn build_command(
                 "--enable_status=1".into(),
             ],
         ),
+        "arp_discovery" => {
+            let mut a = vec!["-I".into(), g("iface")];
+            if g("cidr").is_empty() {
+                a.push("--localnet".into());
+            } else {
+                // Explicit `--` so the CIDR cannot be interpreted as a flag.
+                a.push("--".into());
+                a.push(g("cidr"));
+            }
+            ("arp-scan".into(), a)
+        }
         "nmap_scan" => {
             let mut a: Vec<String> = Vec::new();
             // Default: SYN scan (-sS) requires root; nmap falls back to -sT
