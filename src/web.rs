@@ -884,7 +884,14 @@ fn read_finding(form: &HashMap<String, String>, mut f: Finding) -> Finding {
     f.attack_tactic = g(form, "tactic").to_string();
     f.technique_id = g(form, "technique_id").to_string();
     f.cvss_vector = g(form, "cvss_vector").to_string();
-    f.cvss_score = g(form, "cvss_score").parse().unwrap_or(0.0);
+    // When the vector parses as CVSS 3.1, the computed base score is the
+    // source of truth — operators should not be able to misreport the
+    // score next to the vector. If the vector is blank or unparseable,
+    // the manual score field is honoured.
+    f.cvss_score = match crate::cvss::Vector::parse(f.cvss_vector.trim()) {
+        Ok(v) => v.base_score() as f32,
+        Err(_) => g(form, "cvss_score").parse().unwrap_or(0.0),
+    };
     f.affected_asset = g(form, "affected_asset").to_string();
     f.dread = Dread {
         damage: clamp10(g(form, "dread_d")),

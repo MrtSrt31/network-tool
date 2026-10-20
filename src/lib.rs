@@ -7,6 +7,7 @@
 pub mod audit;
 pub mod content;
 pub mod crypto;
+pub mod cvss;
 pub mod logging;
 pub mod model;
 pub mod modules;
