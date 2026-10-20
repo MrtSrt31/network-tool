@@ -33,6 +33,7 @@ pub fn serve(port: u16, open: bool) -> Result<(), Box<dyn std::error::Error>> {
         "session token persisted in {}",
         store::data_dir().join(".session").display()
     );
+    log::info!("gui serving on {addr}");
     if open {
         let _ = std::process::Command::new("open")
             .arg(&authenticated_url)
@@ -85,6 +86,7 @@ fn handle(mut request: tiny_http::Request) {
 
     let set_cookie = match decision {
         AuthDecision::Deny(reason) => {
+            log::warn!("auth deny {method:?} {raw_url} :: {reason}");
             let _ = request.respond(
                 Response::from_string(format!("403 forbidden: {reason}"))
                     .with_status_code(403)
@@ -92,7 +94,10 @@ fn handle(mut request: tiny_http::Request) {
             );
             return;
         }
-        AuthDecision::Allow { set_cookie } => set_cookie,
+        AuthDecision::Allow { set_cookie } => {
+            log::info!("request {method:?} {raw_url}");
+            set_cookie
+        }
     };
 
     let path = raw_url.split('?').next().unwrap_or("");
@@ -614,6 +619,13 @@ fn modules_run(id: &str, form: &HashMap<String, String>) -> Out {
     let warnings = match modules::gate(&e, &spec, &params, dry_run, confirm) {
         Ok(w) => w,
         Err(m) => {
+            log::warn!(
+                "gate block · engagement={} module={} dry_run={} :: {}",
+                e.id,
+                spec.id,
+                dry_run,
+                m
+            );
             return module_result(id, &spec, "", &[format!("blocked: {m}")], None, "", "");
         }
     };

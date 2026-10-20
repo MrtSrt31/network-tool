@@ -340,6 +340,7 @@ dependencies = [
  "chrono",
  "clap",
  "libc",
+ "log",
  "serde",
  "serde_json",
  "sha2",
