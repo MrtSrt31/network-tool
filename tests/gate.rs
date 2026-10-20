@@ -309,6 +309,78 @@ fn nmap_scan_empty_scope_cidrs_warns_but_passes() {
     assert!(warnings.iter().any(|w| w.contains("in-scope CIDR")));
 }
 
+// ---------- scope matcher (P1.2) ----------
+
+#[test]
+fn cidr_containment_allows_specific_target_in_broader_scope() {
+    let mut e = authorized_engagement(false);
+    e.scope.in_scope_cidrs = vec!["10.0.0.0/16".into()];
+    let s = spec("nmap_scan");
+    let p = params(&[("cidr", "10.0.5.17")]);
+    assert!(gate(&e, &s, &p, false, false).is_ok());
+    let p2 = params(&[("cidr", "10.0.5.0/24")]);
+    assert!(gate(&e, &s, &p2, false, false).is_ok());
+}
+
+#[test]
+fn cidr_containment_rejects_broader_target_than_scope() {
+    let mut e = authorized_engagement(false);
+    e.scope.in_scope_cidrs = vec!["10.0.0.0/24".into()];
+    let s = spec("nmap_scan");
+    let p = params(&[("cidr", "10.0.0.0/16")]);
+    let res = gate(&e, &s, &p, false, false);
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("in-scope CIDR"));
+}
+
+#[test]
+fn oui_prefix_allows_matching_bssid() {
+    let mut e = authorized_engagement(true);
+    e.scope.in_scope_oui_prefixes = vec!["AA:BB:CC".into()];
+    let s = spec("deauth");
+    let p = params(&[("bssid", "AA:BB:CC:DD:EE:FF"), ("iface", "wlan0mon")]);
+    assert!(gate(&e, &s, &p, false, true).is_ok());
+}
+
+#[test]
+fn oui_prefix_rejects_different_vendor() {
+    let mut e = authorized_engagement(true);
+    e.scope.in_scope_oui_prefixes = vec!["AA:BB:CC".into()];
+    let s = spec("deauth");
+    let p = params(&[("bssid", "DE:AD:BE:EF:00:01"), ("iface", "wlan0mon")]);
+    let res = gate(&e, &s, &p, false, true);
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("in-scope BSSID / OUI"));
+}
+
+#[test]
+fn ssid_glob_allows_matching_target() {
+    let mut e = authorized_engagement(true);
+    e.scope.in_scope_ssid_patterns = vec!["Corp-*".into()];
+    let s = spec("evil_twin");
+    let p = params(&[
+        ("essid", "Corp-Guest"),
+        ("channel", "6"),
+        ("iface", "wlan0mon"),
+    ]);
+    assert!(gate(&e, &s, &p, false, true).is_ok());
+}
+
+#[test]
+fn ssid_glob_rejects_unmatched_target() {
+    let mut e = authorized_engagement(true);
+    e.scope.in_scope_ssid_patterns = vec!["Corp-*".into()];
+    let s = spec("evil_twin");
+    let p = params(&[
+        ("essid", "RogueSSID"),
+        ("channel", "6"),
+        ("iface", "wlan0mon"),
+    ]);
+    let res = gate(&e, &s, &p, false, true);
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("in-scope SSID"));
+}
+
 #[test]
 fn arp_discovery_without_cidr_uses_localnet_and_passes() {
     let e = authorized_engagement(false);

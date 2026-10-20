@@ -13,6 +13,7 @@ pub mod modules;
 pub mod recon;
 pub mod report;
 pub mod roe;
+pub mod scope;
 pub mod store;
 pub mod util;
 pub mod validate;
