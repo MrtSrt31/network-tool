@@ -174,6 +174,14 @@ pub fn markdown(e: &Engagement) -> String {
     }
     s.push('\n');
 
+    s.push_str("---\n\n");
+    s.push_str(&format!(
+        "_Audit chain head: `{}` ({} entries). Verify with `networktool audit verify {}`._\n",
+        crate::audit::chain_head(e),
+        e.action_log.len(),
+        e.id,
+    ));
+
     s
 }
 
@@ -333,6 +341,13 @@ pub fn html(e: &Engagement) -> String {
         body.push_str(&format!("<tr><td>{}</td><td>{}</td></tr>", esc(k), esc(v)));
     }
     body.push_str("</table>");
+
+    body.push_str(&format!(
+        "<hr><p class=meta><b>Audit chain head:</b> <span class=mono>{}</span> &nbsp;·&nbsp; {} entries &nbsp;·&nbsp; verify with <code>networktool audit verify {}</code></p>",
+        esc(&crate::audit::chain_head(e)),
+        e.action_log.len(),
+        esc(&e.id),
+    ));
 
     wrap_report_html(&e.name, &body)
 }

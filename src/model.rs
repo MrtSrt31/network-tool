@@ -352,6 +352,12 @@ pub struct Retest {
 }
 
 /// An immutable record of an active-module invocation (evidence / audit trail).
+///
+/// Entries form a hash chain: `hash = SHA-256(prev_hash || canonical-fields)`.
+/// The first entry's `prev_hash` is the engagement-specific genesis string.
+/// A single flipped character in any field — anywhere in the chain — breaks
+/// every subsequent hash, so tampering is detectable with
+/// `audit::verify_action_log`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ActionRun {
     pub id: String,
@@ -366,6 +372,10 @@ pub struct ActionRun {
     pub timed_out: bool,
     pub summary: String,
     pub operator: String,
+    #[serde(default)]
+    pub prev_hash: String,
+    #[serde(default)]
+    pub hash: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

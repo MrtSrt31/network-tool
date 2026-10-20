@@ -4,6 +4,7 @@
 //!
 //! For authorized assessments only.
 
+pub mod audit;
 pub mod content;
 pub mod model;
 pub mod modules;

@@ -755,7 +755,7 @@ fn record_action_web(
         .cloned()
         .unwrap_or_default();
     let operator = e.tester.name.clone();
-    e.action_log.push(ActionRun {
+    let action = ActionRun {
         id: new_id(),
         at: chrono::Utc::now(),
         module_id: spec.id.to_string(),
@@ -768,7 +768,11 @@ fn record_action_web(
         timed_out,
         summary,
         operator,
-    });
+        prev_hash: String::new(),
+        hash: String::new(),
+    };
+    let sealed = crate::audit::seal_new_action(e, action);
+    e.action_log.push(sealed);
 }
 
 fn finding_form(id: &str, existing: Option<&Finding>) -> Out {
