@@ -167,6 +167,54 @@ fn roe_html_drops_draft_banner_once_authorized() {
     assert!(html.contains("ROE-123"));
 }
 
+// ---------- Report tamper-evidence (P1.10) ----------
+
+#[test]
+fn report_markdown_verifies_round_trip() {
+    let e = populated_engagement();
+    let md = report::markdown(&e);
+    let digest = report::verify(&md).expect("fresh report must verify");
+    assert_eq!(digest.len(), 64);
+    assert!(digest.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
+fn report_html_verifies_round_trip() {
+    let e = populated_engagement();
+    let html = report::html(&e);
+    report::verify(&html).expect("fresh HTML report must verify");
+}
+
+#[test]
+fn report_tamper_is_detected() {
+    let e = populated_engagement();
+    let md = report::markdown(&e);
+    // Flip a single character in the body (not in the hash itself).
+    let tampered = md.replacen("Smoke engagement", "EVIL engagement", 1);
+    match report::verify(&tampered) {
+        Err(report::VerifyError::Mismatch { .. }) => {}
+        other => panic!("expected Mismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn report_verify_rejects_file_without_marker() {
+    let s = "no hash here";
+    match report::verify(s) {
+        Err(report::VerifyError::NoMarker) => {}
+        other => panic!("expected NoMarker, got {other:?}"),
+    }
+}
+
+#[test]
+fn report_verify_rejects_malformed_hash() {
+    let s = "foo NTOOL_HASH:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz bar";
+    match report::verify(s) {
+        Err(report::VerifyError::MalformedHash) => {}
+        other => panic!("expected MalformedHash, got {other:?}"),
+    }
+}
+
 // ---------- Finding ↔ ActionRun links (P1.7) ----------
 
 #[test]
