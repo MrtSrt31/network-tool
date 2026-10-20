@@ -219,7 +219,7 @@ fn intake_form(existing: Option<&Engagement>) -> String {
 <fieldset><legend>Client</legend>\
 {c_name}{c_contact}{c_email}{c_addr}</fieldset>\
 <fieldset><legend>Scope</legend>\
-{s_appr}{s_ssids}{s_bssids}{s_windows}{s_allowed}{s_prohibited}{s_out}{s_notes}</fieldset>\
+{s_appr}{s_ssids}{s_bssids}{s_cidrs}{s_windows}{s_allowed}{s_prohibited}{s_out}{s_notes}</fieldset>\
 <fieldset class=authbox><legend>Authorization / Rules of Engagement</legend>\
 <p class=note>Active (intrusive) testing stays locked until a signed authorization is recorded here.</p>\
 {a_auth}{a_name}{a_title}{a_date}{a_roe}{a_disruptive}{a_contact}</fieldset>\
@@ -242,6 +242,7 @@ fn intake_form(existing: Option<&Engagement>) -> String {
         s_appr = sel("scope_approach", "Approach", &approaches, &e.scope.approach),
         s_ssids = ta("scope_ssids", "In-scope SSIDs (one per line)", &vec_to_lines(&e.scope.in_scope_ssids), 3),
         s_bssids = ta("scope_bssids", "In-scope BSSIDs (one per line)", &vec_to_lines(&e.scope.in_scope_bssids), 3),
+        s_cidrs = ta("scope_cidrs", "In-scope CIDRs (wired targets, one per line)", &vec_to_lines(&e.scope.in_scope_cidrs), 3),
         s_windows = inp("scope_windows", "Test windows", &e.scope.test_windows, "e.g. 09:00–18:00, 3 business days"),
         s_allowed = ta("scope_allowed", "Allowed techniques (one per line)", &vec_to_lines(&e.scope.allowed_techniques), 3),
         s_prohibited = ta("scope_prohibited", "Prohibited techniques (one per line)", &vec_to_lines(&e.scope.prohibited_techniques), 3),
@@ -302,6 +303,7 @@ fn apply_intake(e: &mut Engagement, form: &HashMap<String, String>) {
         approach: g(form, "scope_approach").to_string(),
         in_scope_ssids: lines_to_vec(g(form, "scope_ssids")),
         in_scope_bssids: lines_to_vec(g(form, "scope_bssids")),
+        in_scope_cidrs: lines_to_vec(g(form, "scope_cidrs")),
         out_of_scope_notes: g(form, "scope_out").to_string(),
         test_windows: g(form, "scope_windows").to_string(),
         allowed_techniques: lines_to_vec(g(form, "scope_allowed")),
@@ -608,7 +610,7 @@ fn modules_run(id: &str, form: &HashMap<String, String>) -> Out {
     let mut params: HashMap<String, String> = HashMap::new();
     for k in [
         "iface", "bssid", "channel", "client", "count", "wordlist", "capture", "essid", "prefix",
-        "out",
+        "out", "cidr", "ports", "timing",
     ] {
         let v = g(form, k);
         if !v.is_empty() {

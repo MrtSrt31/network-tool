@@ -141,6 +141,11 @@ pub struct Scope {
     pub approach: String,
     pub in_scope_ssids: Vec<String>,
     pub in_scope_bssids: Vec<String>,
+    /// IPv4 CIDRs (or single IPs) authorised for wired-side modules.
+    /// P1.1a: compared as exact strings against the module's `cidr` parameter;
+    /// a real subnet-containment matcher is P1.2.
+    #[serde(default)]
+    pub in_scope_cidrs: Vec<String>,
     pub out_of_scope_notes: String,
     pub test_windows: String,
     pub allowed_techniques: Vec<String>,

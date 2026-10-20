@@ -189,6 +189,21 @@ pub fn registry() -> Vec<ModuleSpec> {
             ],
         },
         ModuleSpec {
+            id: "nmap_scan",
+            name: "Wired host discovery + port scan (nmap)",
+            category: "Network Segmentation",
+            tactic: "Discovery",
+            technique: "T1046",
+            disruptive: false,
+            tools: &["nmap"],
+            description: "Discover live hosts and open TCP ports on a wired subnet (nmap). Default: SYN scan, default-top-ports. Use the smallest in-scope CIDR; aggressive timing can be noisy.",
+            params: vec![
+                p("cidr", "Target (CIDR or single IP)", true, "10.0.0.0/24", ParamKind::Cidr),
+                p("ports", "Ports (comma/range list, or - for all)", false, "22,80,443,445,3389", ParamKind::Ports),
+                p("timing", "Timing (T0..T5)", false, "T3", ParamKind::Timing),
+            ],
+        },
+        ModuleSpec {
             id: "evil_twin",
             name: "Rogue AP / evil twin",
             category: "Rogue / Evil Twin & Client-side",
@@ -298,6 +313,28 @@ pub fn gate(
         }
     }
 
+    // Scope gate for wired targets (CIDR). P1.1a: exact string match against
+    // scope.in_scope_cidrs. A real subnet-containment matcher is scheduled
+    // for P1.2.
+    if let Some(cidr) = params.get("cidr") {
+        let c = cidr.trim();
+        if !c.is_empty() {
+            if e.scope.in_scope_cidrs.is_empty() {
+                warnings.push("no in-scope CIDR list defined — scope not enforced".to_string());
+            } else {
+                let in_scope = e.scope.in_scope_cidrs.iter().any(|x| x.trim() == c);
+                if !in_scope {
+                    let msg = format!("target {c} is not in the engagement's in-scope CIDR list");
+                    if dry_run {
+                        warnings.push(msg);
+                    } else {
+                        return Err(msg);
+                    }
+                }
+            }
+        }
+    }
+
     Ok(warnings)
 }
 
@@ -390,6 +427,22 @@ pub fn build_command(
                 "--enable_status=1".into(),
             ],
         ),
+        "nmap_scan" => {
+            let mut a: Vec<String> = Vec::new();
+            // Default: SYN scan (-sS) requires root; nmap falls back to -sT
+            // automatically for unprivileged users, so we always ask for -sS.
+            a.push("-sS".into());
+            let timing = or("timing", "T3");
+            a.push(format!("-{timing}"));
+            if !g("ports").is_empty() {
+                a.push("-p".into());
+                a.push(g("ports"));
+            }
+            // Explicit separator so the target cannot be interpreted as a flag.
+            a.push("--".into());
+            a.push(g("cidr"));
+            ("nmap".into(), a)
+        }
         "evil_twin" => (
             "airbase-ng".into(),
             vec![
