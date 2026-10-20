@@ -34,6 +34,10 @@ pub struct Engagement {
     pub findings: Vec<Finding>,
     #[serde(default)]
     pub action_log: Vec<ActionRun>,
+    /// Monotonically increasing version, bumped on every successful save.
+    /// Used by `store::save` for optimistic-concurrency conflict detection.
+    #[serde(default)]
+    pub version: u64,
 }
 
 impl Engagement {
@@ -50,6 +54,7 @@ impl Engagement {
             assets: vec![],
             findings: vec![],
             action_log: vec![],
+            version: 0,
         }
     }
 

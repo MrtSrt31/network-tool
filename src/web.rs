@@ -263,10 +263,8 @@ fn edit_page(id: &str) -> Out {
 fn create_engagement(form: &HashMap<String, String>) -> Out {
     let mut e = Engagement::new(g(form, "name").to_string());
     apply_intake(&mut e, form);
-    if store::save(&e).is_err() {
-        return err_page("Could not save engagement.");
-    }
-    Out::Redirect(format!("/engagement/{}", e.id))
+    let dest = format!("/engagement/{}", e.id);
+    save_then_redirect(&mut e, dest)
 }
 
 fn update_engagement(id: &str, form: &HashMap<String, String>) -> Out {
@@ -276,8 +274,8 @@ fn update_engagement(id: &str, form: &HashMap<String, String>) -> Out {
     };
     e.name = g(form, "name").to_string();
     apply_intake(&mut e, form);
-    let _ = store::save(&e);
-    Out::Redirect(format!("/engagement/{}", e.id))
+    let dest = format!("/engagement/{}", e.id);
+    save_then_redirect(&mut e, dest)
 }
 
 fn apply_intake(e: &mut Engagement, form: &HashMap<String, String>) {
@@ -480,8 +478,8 @@ fn recon_import(id: &str, form: &HashMap<String, String>) -> Out {
         e.findings.append(&mut drafts);
     }
     e.assets.append(&mut assets);
-    let _ = store::save(&e);
-    Out::Redirect(format!("/engagement/{}", e.id))
+    let dest = format!("/engagement/{}", e.id);
+    save_then_redirect(&mut e, dest)
 }
 
 fn modules_page(id: &str) -> Out {
@@ -634,7 +632,7 @@ fn modules_run(id: &str, form: &HashMap<String, String>) -> Out {
             false,
             "dry-run (not executed)".to_string(),
         );
-        let _ = store::save(&e);
+        save_with_action_retry(&mut e);
         return module_result(
             id,
             &spec,
@@ -675,7 +673,7 @@ fn modules_run(id: &str, form: &HashMap<String, String>) -> Out {
                 r.timed_out,
                 summary,
             );
-            let _ = store::save(&e);
+            save_with_action_retry(&mut e);
             module_result(id, &spec, &cmdline, &warnings, ec, &so, &se)
         }
         Err(err) => module_result(
@@ -875,8 +873,8 @@ fn finding_create(id: &str, form: &HashMap<String, String>) -> Out {
     };
     let f = read_finding(form, Finding::new(String::new()));
     e.findings.push(f);
-    let _ = store::save(&e);
-    Out::Redirect(format!("/engagement/{}", e.id))
+    let dest = format!("/engagement/{}", e.id);
+    save_then_redirect(&mut e, dest)
 }
 
 fn finding_update(id: &str, fid: &str, form: &HashMap<String, String>) -> Out {
@@ -884,14 +882,16 @@ fn finding_update(id: &str, fid: &str, form: &HashMap<String, String>) -> Out {
         Ok(e) => e,
         Err(_) => return not_found(),
     };
+    let dest = format!("/engagement/{id}/finding/{fid}");
     if let Some(idx) = e.findings.iter().position(|f| f.id == fid) {
         let existing = e.findings[idx].clone();
         let updated = read_finding(form, existing);
         e.findings[idx] = updated;
         e.findings[idx].auto_detected = false;
-        let _ = store::save(&e);
+        save_then_redirect(&mut e, dest)
+    } else {
+        Out::Redirect(dest)
     }
-    Out::Redirect(format!("/engagement/{id}/finding/{fid}"))
 }
 
 fn finding_retest(id: &str, fid: &str, form: &HashMap<String, String>) -> Out {
@@ -899,7 +899,8 @@ fn finding_retest(id: &str, fid: &str, form: &HashMap<String, String>) -> Out {
         Ok(e) => e,
         Err(_) => return not_found(),
     };
-    if let Some(f) = e.findings.iter_mut().find(|f| f.id == fid) {
+    let dest = format!("/engagement/{id}/finding/{fid}");
+    let found = if let Some(f) = e.findings.iter_mut().find(|f| f.id == fid) {
         let result = RetestResult::from_str(g(form, "r_result"));
         f.status = match result {
             RetestResult::Mitigated => FindingStatus::Mitigated,
@@ -912,9 +913,15 @@ fn finding_retest(id: &str, fid: &str, form: &HashMap<String, String>) -> Out {
             result,
             notes: g(form, "r_notes").to_string(),
         });
-        let _ = store::save(&e);
+        true
+    } else {
+        false
+    };
+    if found {
+        save_then_redirect(&mut e, dest)
+    } else {
+        Out::Redirect(dest)
     }
-    Out::Redirect(format!("/engagement/{id}/finding/{fid}"))
 }
 
 fn finding_detail(id: &str, fid: &str) -> Out {
@@ -1091,6 +1098,60 @@ fn err_page(msg: &str) -> Out {
             esc(msg)
         ),
     ))
+}
+
+/// Persist an engagement after appending an audit-log entry, retrying up to
+/// four times on an optimistic-concurrency conflict. Audit-log appends are
+/// append-only and idempotent in intent, so losing one to a concurrent
+/// writer would silently erase evidence — the retry reloads the engagement,
+/// re-appends the last action, and tries again. On persistent failure the
+/// action is discarded with no further surfacing (the caller is already
+/// rendering a page for the user).
+fn save_with_action_retry(e: &mut Engagement) {
+    let last_action = e.action_log.last().cloned();
+    if store::save(e).is_ok() {
+        return;
+    }
+    let Some(action) = last_action else {
+        return;
+    };
+    for _ in 0..4 {
+        let mut fresh = match store::load(&e.id) {
+            Ok(x) => x,
+            Err(_) => return,
+        };
+        fresh.action_log.push(action.clone());
+        match store::save(&mut fresh) {
+            Ok(()) => {
+                *e = fresh;
+                return;
+            }
+            Err(store::SaveError::Conflict { .. }) => continue,
+            Err(_) => return,
+        }
+    }
+}
+
+/// Save and either redirect to `next` or render a message page explaining
+/// why the save failed — including the specific "another tab wrote first,
+/// please reload" wording for optimistic-concurrency conflicts.
+fn save_then_redirect(e: &mut Engagement, next: String) -> Out {
+    match store::save(e) {
+        Ok(()) => Out::Redirect(next),
+        Err(store::SaveError::Conflict { .. }) => Out::Html(layout(
+            "Save conflict",
+            "",
+            &format!(
+                "<h1>Save conflict</h1>\
+<p>Another browser tab or CLI command updated this engagement after you loaded it. \
+Your changes were <b>not</b> saved to avoid overwriting that work.</p>\
+<p>Open the engagement again, re-apply your edits on top of the current state, then save.</p>\
+<p><a class=btn href='/engagement/{id}'>← Reload engagement</a></p>",
+                id = e.id,
+            ),
+        )),
+        Err(e) => err_page(&format!("Could not save: {e}")),
+    }
 }
 
 fn inp(name: &str, label: &str, value: &str, ph: &str) -> String {
