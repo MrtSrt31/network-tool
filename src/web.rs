@@ -145,6 +145,12 @@ fn route(method: &Method, segs: &[&str], form: &HashMap<String, String>) -> Out 
         (Method::Post, ["engagement", id, "finding", fid, "attach"]) => {
             finding_attach(id, fid, form)
         }
+        (Method::Post, ["engagement", id, "finding", fid, "evidence", "add"]) => {
+            finding_evidence_add(id, fid, form)
+        }
+        (Method::Post, ["engagement", id, "finding", fid, "evidence", eid, "delete"]) => {
+            finding_evidence_delete(id, fid, eid)
+        }
         (Method::Get, ["engagement", id, "report"]) => match store::load(id) {
             Ok(e) => Out::Html(report::html(&e)),
             Err(_) => not_found(),
@@ -938,6 +944,43 @@ fn finding_update(id: &str, fid: &str, form: &HashMap<String, String>) -> Out {
     }
 }
 
+/// Append a new text evidence item to a finding. The content is captured
+/// as-is, timestamped, and sealed with its own SHA-256 so later edits are
+/// detectable.
+fn finding_evidence_add(id: &str, fid: &str, form: &HashMap<String, String>) -> Out {
+    let mut e = match store::load(id) {
+        Ok(e) => e,
+        Err(_) => return not_found(),
+    };
+    let dest = format!("/engagement/{id}/finding/{fid}");
+    let note = g(form, "evidence_note").to_string();
+    let content = g(form, "evidence_content").to_string();
+    if content.trim().is_empty() {
+        return Out::Redirect(dest);
+    }
+    if let Some(f) = e.findings.iter_mut().find(|f| f.id == fid) {
+        f.evidence_items.push(EvidenceItem::new(note, content));
+        save_then_redirect(&mut e, dest)
+    } else {
+        Out::Redirect(dest)
+    }
+}
+
+/// Remove one evidence item by id.
+fn finding_evidence_delete(id: &str, fid: &str, eid: &str) -> Out {
+    let mut e = match store::load(id) {
+        Ok(e) => e,
+        Err(_) => return not_found(),
+    };
+    let dest = format!("/engagement/{id}/finding/{fid}");
+    if let Some(f) = e.findings.iter_mut().find(|f| f.id == fid) {
+        f.evidence_items.retain(|x| x.id != eid);
+        save_then_redirect(&mut e, dest)
+    } else {
+        Out::Redirect(dest)
+    }
+}
+
 /// Attach / detach `ActionRun` ids to a finding. The form submits a
 /// checkbox per action with name `attach_<id>`; everything present is the
 /// new set, so unchecked boxes implicitly detach. Unknown ids (no matching
@@ -1022,6 +1065,47 @@ fn finding_detail(id: &str, fid: &str) -> Out {
         retests.push_str("</table>");
     }
 
+    // Structured evidence items (P1.4a): text snippets attached to this
+    // finding with a SHA-256 digest so later edits are detectable.
+    let mut evidence_section = String::new();
+    if f.evidence_items.is_empty() {
+        evidence_section
+            .push_str("<p class=dim>No structured evidence items yet. Attach one below.</p>");
+    } else {
+        evidence_section.push_str("<table><tr><th>Captured</th><th>Note</th><th>SHA-256</th><th>Content (preview)</th><th></th></tr>");
+        for item in &f.evidence_items {
+            let preview: String = item.content.chars().take(140).collect();
+            evidence_section.push_str(&format!(
+                "<tr>\
+<td class=mono>{at}</td>\
+<td>{note}</td>\
+<td class=mono>{hash}</td>\
+<td class=mono>{preview}</td>\
+<td><form method=post action='/engagement/{id}/finding/{fid}/evidence/{eid}/delete' style='display:inline'>{csrf}<button class=btn type=submit>Delete</button></form></td>\
+</tr>",
+                at = item.captured_at.format("%Y-%m-%d %H:%M"),
+                note = esc(&item.note),
+                hash = esc(&item.sha256[..16]),
+                preview = esc(&preview),
+                id = id,
+                fid = fid,
+                eid = item.id,
+                csrf = auth::csrf_field(),
+            ));
+        }
+        evidence_section.push_str("</table>");
+    }
+    evidence_section.push_str(&format!(
+        "<form method=post action='/engagement/{id}/finding/{fid}/evidence/add' class=form>{csrf}\
+<label>Note<input name=evidence_note placeholder='e.g. aircrack-ng handshake output'></label>\
+<label>Content<textarea name=evidence_content rows=4 placeholder='paste tool output / log excerpt / observation'></textarea></label>\
+<div class=actions><button class=btn-primary type=submit>Attach evidence</button></div>\
+</form>",
+        id = id,
+        fid = fid,
+        csrf = auth::csrf_field(),
+    ));
+
     // Audit-log attachment UI: a checkbox per ActionRun, pre-checked when
     // the action is already linked to this finding.
     let attached: std::collections::HashSet<&str> =
@@ -1080,6 +1164,7 @@ fn finding_detail(id: &str, fid: &str) -> Out {
 <p class=lbl>Evidence</p><p>{ev}</p>\
 <p class=lbl>Impact</p><p>{imp}</p>\
 <p class=lbl>Remediation</p><p>{rem}</p></div>\
+<h2>Structured evidence (SHA-256 sealed)</h2>{evidence_section}\
 <h2>Linked actions (audit chain evidence)</h2>{attach_section}\
 <h2>Iterative retest</h2>{retests}\
 <form method=post action='/engagement/{id}/finding/{fid}/retest' class=form>{csrf}\
