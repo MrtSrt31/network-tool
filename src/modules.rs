@@ -18,9 +18,10 @@
 
 use crate::model::Engagement;
 use crate::validate::{self, ParamKind};
-use std::io::Read;
+use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -437,11 +438,46 @@ pub struct RunResult {
     pub stdout: String,
     pub stderr: String,
     pub timed_out: bool,
+    /// True when the run was aborted via the `stop` flag (external cancel).
+    pub cancelled: bool,
 }
 
-/// Run an external command, capturing output. If `timeout_secs > 0`, a watchdog
-/// kills the process after the deadline.
-pub fn execute(program: &str, args: &[String], timeout_secs: u64) -> std::io::Result<RunResult> {
+/// Which pipe a line of output came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineTag {
+    Stdout,
+    Stderr,
+}
+
+/// A single line of output as it was produced by the child process.
+#[derive(Clone, Debug)]
+pub struct Line {
+    pub tag: LineTag,
+    pub text: String,
+}
+
+/// Run an external command, streaming each line of output through `on_line`
+/// as it is produced. Pipes are drained by dedicated reader threads so the
+/// child cannot deadlock on a full stdout/stderr buffer.
+///
+/// * `timeout_secs > 0` arms a watchdog that kills the child after the
+///   deadline (`RunResult.timed_out = true`).
+/// * `stop` is an optional external cancel flag; set it to `true` to request
+///   termination (`RunResult.cancelled = true`). Both signals are polled on
+///   the same 200 ms tick, so cancel/timeout latency is sub-second.
+///
+/// The returned `RunResult` also carries the aggregated stdout and stderr for
+/// the action log; the callback sees them line-by-line in real time.
+pub fn execute_streaming<F>(
+    program: &str,
+    args: &[String],
+    timeout_secs: u64,
+    stop: Option<Arc<AtomicBool>>,
+    mut on_line: F,
+) -> std::io::Result<RunResult>
+where
+    F: FnMut(Line),
+{
     let cmdline = display_command(program, args);
 
     let mut child = Command::new(program)
@@ -451,18 +487,55 @@ pub fn execute(program: &str, args: &[String], timeout_secs: u64) -> std::io::Re
         .stderr(Stdio::piped())
         .spawn()?;
 
-    let mut out = child.stdout.take().expect("piped stdout");
-    let mut err = child.stderr.take().expect("piped stderr");
+    let stdout_pipe = child.stdout.take().expect("piped stdout");
+    let stderr_pipe = child.stderr.take().expect("piped stderr");
+
+    let (tx, rx) = mpsc::channel::<Line>();
+    let tx_err = tx.clone();
+
+    // Dedicated reader thread per pipe — no interleave starvation, no deadlock.
+    let out_handle = thread::spawn(move || {
+        let reader = BufReader::new(stdout_pipe);
+        for line in reader.lines().map_while(Result::ok) {
+            if tx
+                .send(Line {
+                    tag: LineTag::Stdout,
+                    text: line,
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+    let err_handle = thread::spawn(move || {
+        let reader = BufReader::new(stderr_pipe);
+        for line in reader.lines().map_while(Result::ok) {
+            if tx_err
+                .send(Line {
+                    tag: LineTag::Stderr,
+                    text: line,
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
 
     let timed_out = Arc::new(AtomicBool::new(false));
+    let cancelled = Arc::new(AtomicBool::new(false));
     let child = Arc::new(Mutex::new(child));
 
-    let watchdog = if timeout_secs > 0 {
+    // Watchdog: polls timeout AND external stop flag; kills the child on either.
+    let watchdog = {
         let w = Arc::clone(&child);
-        let flag = Arc::clone(&timed_out);
-        Some(thread::spawn(move || {
-            let deadline = Duration::from_secs(timeout_secs);
+        let to_flag = Arc::clone(&timed_out);
+        let cx_flag = Arc::clone(&cancelled);
+        let stop = stop.clone();
+        thread::spawn(move || {
             let step = Duration::from_millis(200);
+            let deadline = Duration::from_secs(timeout_secs);
             let mut waited = Duration::from_millis(0);
             loop {
                 thread::sleep(step);
@@ -474,8 +547,15 @@ pub fn execute(program: &str, args: &[String], timeout_secs: u64) -> std::io::Re
                 match guard.try_wait() {
                     Ok(Some(_)) => return,
                     Ok(None) => {
-                        if waited >= deadline {
-                            flag.store(true, Ordering::SeqCst);
+                        if let Some(s) = &stop {
+                            if s.load(Ordering::SeqCst) {
+                                cx_flag.store(true, Ordering::SeqCst);
+                                let _ = guard.kill();
+                                return;
+                            }
+                        }
+                        if timeout_secs > 0 && waited >= deadline {
+                            to_flag.store(true, Ordering::SeqCst);
                             let _ = guard.kill();
                             return;
                         }
@@ -483,32 +563,51 @@ pub fn execute(program: &str, args: &[String], timeout_secs: u64) -> std::io::Re
                     Err(_) => return,
                 }
             }
-        }))
-    } else {
-        None
+        })
     };
 
-    let mut stdout = String::new();
-    let _ = out.read_to_string(&mut stdout);
-    let mut stderr = String::new();
-    let _ = err.read_to_string(&mut stderr);
+    let mut stdout_buf = String::new();
+    let mut stderr_buf = String::new();
+    for line in rx {
+        match line.tag {
+            LineTag::Stdout => {
+                stdout_buf.push_str(&line.text);
+                stdout_buf.push('\n');
+            }
+            LineTag::Stderr => {
+                stderr_buf.push_str(&line.text);
+                stderr_buf.push('\n');
+            }
+        }
+        on_line(line);
+    }
 
     let status = { child.lock().unwrap().wait()? };
-    if let Some(h) = watchdog {
-        let _ = h.join();
-    }
+    let _ = out_handle.join();
+    let _ = err_handle.join();
+    let _ = watchdog.join();
 
     Ok(RunResult {
         command: cmdline,
         exit_code: status.code(),
-        stdout,
-        stderr,
+        stdout: stdout_buf,
+        stderr: stderr_buf,
         timed_out: timed_out.load(Ordering::SeqCst),
+        cancelled: cancelled.load(Ordering::SeqCst),
     })
+}
+
+/// Backwards-compatible wrapper: runs the command, discards per-line events
+/// and returns the aggregated output. Prefer [`execute_streaming`] in new code.
+pub fn execute(program: &str, args: &[String], timeout_secs: u64) -> std::io::Result<RunResult> {
+    execute_streaming(program, args, timeout_secs, None, |_| {})
 }
 
 /// A short one-line summary for the action log.
 pub fn summarize(r: &RunResult) -> String {
+    if r.cancelled {
+        return "cancelled by operator (stop requested)".to_string();
+    }
     if r.timed_out {
         return "timed out (watchdog killed the process)".to_string();
     }

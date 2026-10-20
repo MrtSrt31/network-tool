@@ -457,19 +457,25 @@ fn run_module(a: ModuleRunArgs) -> Result<(), Box<dyn Error>> {
         return Err(format!("required tool not found on PATH: {program}").into());
     }
 
-    let r = modules::execute(&program, &args, a.timeout)?;
-    if !r.stdout.is_empty() {
-        println!("{}", r.stdout);
+    // Stream output live so long-running modules (airodump-ng, reaver,
+    // hcxdumptool) are visible in the terminal as they produce lines.
+    let r = modules::execute_streaming(&program, &args, a.timeout, None, |line| match line.tag {
+        modules::LineTag::Stdout => println!("{}", line.text),
+        modules::LineTag::Stderr => eprintln!("{}", line.text),
+    })?;
+    let mut suffix = String::new();
+    if r.timed_out {
+        suffix.push_str(" · TIMED OUT");
     }
-    if !r.stderr.is_empty() {
-        eprintln!("{}", r.stderr);
+    if r.cancelled {
+        suffix.push_str(" · CANCELLED");
     }
     println!(
         "[exit {}{}]",
         r.exit_code
             .map(|c| c.to_string())
             .unwrap_or_else(|| "signal".to_string()),
-        if r.timed_out { " · TIMED OUT" } else { "" }
+        suffix,
     );
 
     let summary = modules::summarize(&r);
