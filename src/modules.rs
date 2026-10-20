@@ -18,7 +18,8 @@
 
 use crate::model::Engagement;
 use crate::validate::{self, ParamKind};
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader};
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -533,12 +534,26 @@ where
 {
     let cmdline = display_command(program, args);
 
-    let mut child = Command::new(program)
-        .args(args)
+    let mut cmd = Command::new(program);
+    cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    // Put the child in a fresh process group so we can SIGKILL the whole
+    // group, not just the direct child. Without this, a child that forks
+    // its own helpers (`sh -c '...'`, `aireplay-ng`, `hcxdumptool`, etc.)
+    // leaves orphan grandchildren alive after `Child::kill`, which also
+    // keep stdout/stderr pipes open and deadlock the reader threads.
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setpgid(0, 0) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn()?;
+    let child_pid = child.id() as i32;
 
     let stdout_pipe = child.stdout.take().expect("piped stdout");
     let stderr_pipe = child.stderr.take().expect("piped stderr");
@@ -580,7 +595,11 @@ where
     let cancelled = Arc::new(AtomicBool::new(false));
     let child = Arc::new(Mutex::new(child));
 
-    // Watchdog: polls timeout AND external stop flag; kills the child on either.
+    // Watchdog: polls timeout AND external stop flag; kills the child on
+    // either event. Uses `kill(-pid, SIGKILL)` so the whole process group
+    // dies — any grandchildren the module spawned (shell helpers, forked
+    // subprocesses) are reaped too, which is what finally closes the
+    // pipes and lets the reader threads exit.
     let watchdog = {
         let w = Arc::clone(&child);
         let to_flag = Arc::clone(&timed_out);
@@ -603,13 +622,13 @@ where
                         if let Some(s) = &stop {
                             if s.load(Ordering::SeqCst) {
                                 cx_flag.store(true, Ordering::SeqCst);
-                                let _ = guard.kill();
+                                kill_group(child_pid);
                                 return;
                             }
                         }
                         if timeout_secs > 0 && waited >= deadline {
                             to_flag.store(true, Ordering::SeqCst);
-                            let _ = guard.kill();
+                            kill_group(child_pid);
                             return;
                         }
                     }
@@ -654,6 +673,15 @@ where
 /// and returns the aggregated output. Prefer [`execute_streaming`] in new code.
 pub fn execute(program: &str, args: &[String], timeout_secs: u64) -> std::io::Result<RunResult> {
     execute_streaming(program, args, timeout_secs, None, |_| {})
+}
+
+/// SIGKILL the entire process group led by `pid`. Pairs with the
+/// `setpgid(0, 0)` call in `pre_exec` above: the child is the group
+/// leader, so `-pid` targets every descendant it spawned.
+fn kill_group(pid: i32) {
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+    }
 }
 
 /// A short one-line summary for the action log.
