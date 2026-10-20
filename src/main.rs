@@ -228,7 +228,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                     e.tester.email = em;
                 }
                 e.tester.company = "Aturc".to_string();
-                store::save(&e)?;
+                store::save(&mut e)?;
                 println!("created engagement {}  ({})", e.id, e.name);
                 println!("note: active testing is LOCKED until authorization is recorded (networktool gui).");
             }
@@ -278,7 +278,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 f.remediation = remediation.unwrap_or_default();
                 let fid = f.id.clone();
                 e.findings.push(f);
-                store::save(&e)?;
+                store::save(&mut e)?;
                 println!("added finding {fid} to {}", e.id);
             }
             FindAction::List { engagement } => {
@@ -326,7 +326,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                     println!("derived {n} draft finding(s)");
                 }
                 e.assets.append(&mut assets);
-                store::save(&e)?;
+                store::save(&mut e)?;
                 println!(
                     "imported {ap} access point(s) and {st} station(s) into {}",
                     e.id
@@ -448,7 +448,7 @@ fn run_module(a: ModuleRunArgs) -> Result<(), Box<dyn Error>> {
             false,
             "dry-run (not executed)".to_string(),
         );
-        store::save(&e)?;
+        store::save(&mut e)?;
         println!("(dry-run — not executed; logged to action trail)");
         return Ok(());
     }
@@ -489,7 +489,7 @@ fn run_module(a: ModuleRunArgs) -> Result<(), Box<dyn Error>> {
         r.timed_out,
         summary,
     );
-    store::save(&e)?;
+    store::save(&mut e)?;
     Ok(())
 }
 

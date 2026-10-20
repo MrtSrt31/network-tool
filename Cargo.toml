@@ -16,6 +16,7 @@ clap = { version = "4", features = ["derive"] }
 tiny_http = "0.12"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
+libc = "0.2"
 
 [profile.release]
 opt-level = 3
