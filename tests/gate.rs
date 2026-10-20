@@ -310,6 +310,27 @@ fn nmap_scan_empty_scope_cidrs_warns_but_passes() {
 }
 
 #[test]
+fn arp_discovery_without_cidr_uses_localnet_and_passes() {
+    let e = authorized_engagement(false);
+    let s = spec("arp_discovery");
+    let p = params(&[("iface", "eth0")]);
+    assert!(gate(&e, &s, &p, false, false).is_ok());
+}
+
+#[test]
+fn arp_discovery_with_cidr_respects_scope() {
+    let mut e = authorized_engagement(false);
+    e.scope.in_scope_cidrs = vec!["10.0.0.0/24".into()];
+    let s = spec("arp_discovery");
+    let in_scope = params(&[("iface", "eth0"), ("cidr", "10.0.0.0/24")]);
+    assert!(gate(&e, &s, &in_scope, false, false).is_ok());
+    let out_of_scope = params(&[("iface", "eth0"), ("cidr", "10.1.0.0/24")]);
+    let res = gate(&e, &s, &out_of_scope, false, false);
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("in-scope CIDR"));
+}
+
+#[test]
 fn nmap_scan_ports_validation_rejects_metachars() {
     let mut e = authorized_engagement(false);
     e.scope.in_scope_cidrs = vec!["10.0.0.0/24".into()];
